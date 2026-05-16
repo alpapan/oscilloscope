@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scope</title>
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="icon" type="image/x-icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#33ff66">
+  <link rel="stylesheet" href="style.css">
+  <!-- pixi.js v8 UMD bundle: sets window.PIXI. Must run BEFORE the
+       importmap + module-script below so pixi-shim.js can find it. -->
+  <script src="https://cdn.jsdelivr.net/npm/pixi.js@8/dist/pixi.min.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "pixi.js": "./pixi-shim.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+  <div id="controls" hidden>
+    <button id="stop" type="button">Stop</button>
+    <label>View
+      <select id="view">
+        <option value="waveform">Waveform</option>
+        <option value="spectrum">Spectrum</option>
+        <option value="lissajous">Lissajous</option>
+      </select>
+    </label>
+    <label>Theme
+      <select id="theme">
+        <option value="crt">Retro CRT</option>
+        <option value="neon">Neon glow</option>
+        <option value="mono">Minimal mono</option>
+      </select>
+    </label>
+    <label>Sensitivity
+      <input id="gain" type="range" min="0.1" max="4" step="0.1" value="1">
+    </label>
+    <details>
+      <summary>Advanced</summary>
+      <label>FFT size
+        <select id="fft">
+          <option>256</option><option>512</option><option>1024</option>
+          <option selected>2048</option><option>4096</option><option>8192</option>
+          <option>16384</option><option>32768</option>
+        </select>
+      </label>
+      <label>Smoothing
+        <input id="smooth" type="range" min="0" max="0.95" step="0.05" value="0.6">
+      </label>
+    </details>
+  </div>
+  <div id="start-screen">
+    <h1>Scope</h1>
+    <p>A music oscilloscope. Open Spotify Web Player or YouTube in another tab, then click Start and share that tab with audio.</p>
+    <button id="capture" type="button">Start capture</button>
+    <p id="status"></p>
+  </div>
+  <script type="module">
+    // pixi-filters@6 ships no UMD/IIFE browser bundle, so it loads via
+    // ESM from esm.sh. The `?external=pixi.js` parameter tells esm.sh to
+    // import pixi.js as a bare specifier (`from "pixi.js"`), which the
+    // importmap above resolves to ./pixi-shim.js -- the shim re-exports
+    // the UMD pixi.js loaded by the classic <script> tag at the top.
+    // Net effect: a single PIXI instance shared by both our code and
+    // pixi-filters' filter classes.
+    import { GlowFilter, BloomFilter, CRTFilter } from 'https://esm.sh/pixi-filters@6?external=pixi.js';
+    window.PIXI.filters = { GlowFilter, BloomFilter, CRTFilter };
+    const s = document.createElement('script');
+    s.src = 'main.js';
+    document.body.appendChild(s);
+  </script>
+</body>
+</html>
