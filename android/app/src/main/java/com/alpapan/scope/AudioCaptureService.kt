@@ -9,8 +9,12 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
+import android.media.MediaRecorder
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
@@ -25,11 +29,20 @@ class AudioCaptureService : Service() {
     companion object {
         const val EXTRA_PROJECTION_RESULT_CODE = "projection_result_code"
         const val EXTRA_PROJECTION_DATA = "projection_data"
+        const val EXTRA_MIC_MODE = "mic_mode"
         private const val NOTIFICATION_ID = 0x5C09E    // "scope"-ish
         private const val CHANNEL_ID = "scope_audio_capture"
         private const val SAMPLE_RATE = 48000
         private const val FRAMES_PER_CHUNK = 1024
         @Volatile var pluginRef: ScopeAudioPlugin? = null
+        // Monotonic per-service generation token. Each onStartCommand bumps it;
+        // each reader thread captures its own value at start. Notification
+        // callbacks compare-on-fire and silently drop if the latest token has
+        // moved on (i.e. a newer service has taken over). Prevents stale
+        // threads from the previous capture mode from firing events into the
+        // current one when stopService()/startForegroundService() interleave.
+        private val tokenSeq = java.util.concurrent.atomic.AtomicLong(0)
+        @Volatile var latestToken: Long = 0L
     }
 
     @Volatile private var running = false
@@ -41,6 +54,16 @@ class AudioCaptureService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (running) return START_STICKY
+        val micMode = intent?.getBooleanExtra(EXTRA_MIC_MODE, false) ?: false
+        if (micMode) {
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification("Capturing audio (microphone)"),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            )
+            startMicReader()
+            return START_STICKY
+        }
         val resultCode = intent?.getIntExtra(EXTRA_PROJECTION_RESULT_CODE, -1) ?: -1
         val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             intent?.getParcelableExtra(EXTRA_PROJECTION_DATA, Intent::class.java)
@@ -55,7 +78,7 @@ class AudioCaptureService : Service() {
 
         startForeground(
             NOTIFICATION_ID,
-            buildNotification(),
+            buildNotification("Capturing system audio"),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
         )
 
@@ -98,21 +121,200 @@ class AudioCaptureService : Service() {
         record?.startRecording()
         running = true
 
+        val audioMgr = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val myToken = tokenSeq.incrementAndGet()
+        latestToken = myToken
+
         thread = Thread({
             val chunk = FloatArray(FRAMES_PER_CHUNK * 2) // interleaved L,R,L,R...
             val byteBuf = ByteBuffer.allocate(chunk.size * 4).order(ByteOrder.LITTLE_ENDIAN)
-            while (running) {
+            // Re-arming silent-capture detector: instead of a one-shot flag,
+            // track the last-non-zero chunk and the last-fired chunk. We fire
+            // whenever zero-only persists for ~1s after recent non-zero audio
+            // AND a restricted source is active, with a ~10s rate limit between
+            // firings so a single Spotify session doesn't spam the banner.
+            var chunkIdx = 0
+            var lastNonZeroIdx = 0
+            var lastFiredIdx = Int.MIN_VALUE / 2
+            val SILENCE_THRESHOLD_CHUNKS = 50           // ~1.0 s at 1024/48k
+            val RATE_LIMIT_CHUNKS = 500                 // ~10 s
+            while (running && myToken == latestToken) {
                 val n = record?.read(chunk, 0, chunk.size, AudioRecord.READ_BLOCKING) ?: -1
                 if (n <= 0) continue
+                chunkIdx++
+                var anyNonZero = false
+                var i = 0
+                while (i < n) {
+                    if (chunk[i] != 0f) { anyNonZero = true; break }
+                    i++
+                }
+                if (anyNonZero) {
+                    lastNonZeroIdx = chunkIdx
+                } else {
+                    val silentRun = chunkIdx - lastNonZeroIdx
+                    if (silentRun >= SILENCE_THRESHOLD_CHUNKS &&
+                        silentRun % SILENCE_THRESHOLD_CHUNKS == 0 &&
+                        (chunkIdx - lastFiredIdx) > RATE_LIMIT_CHUNKS &&
+                        hasSilentRestrictedPlayback(audioMgr)) {
+                        lastFiredIdx = chunkIdx
+                        if (myToken == latestToken) {
+                            pluginRef?.notifySilentCapture()
+                        }
+                    }
+                }
                 byteBuf.clear()
-                for (i in 0 until n) byteBuf.putFloat(chunk[i])
+                for (j in 0 until n) byteBuf.putFloat(chunk[j])
                 byteBuf.flip()
                 val bytes = ByteArray(byteBuf.remaining())
                 byteBuf.get(bytes)
                 val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                pluginRef?.emitPcmChunk(b64)
+                if (myToken == latestToken) {
+                    pluginRef?.emitPcmChunk(b64)
+                }
             }
         }, "ScopeAudioReader").also { it.start() }
+    }
+
+    /** True iff there is at least one active playback configuration with a
+     *  matching usage that ALSO has the FLAG_NO_MEDIA_PROJECTION flag set in
+     *  its AudioAttributes (visible in the AudioAttributes.toString() output).
+     *
+     *  Detection caveat: FLAG_NO_MEDIA_PROJECTION (0x1 << 10) is `@hide` with
+     *  no public accessor since Android Q. There is no robust public-API way
+     *  to read it; we scrape AudioAttributes.toString(). Verified working on
+     *  Android 14, 15, 16; the format may shift on future versions, in which
+     *  case detection silently fails (banner never appears, capture stays
+     *  silent until the user toggles mic mode manually in the settings
+     *  drawer). Acceptable degradation.
+     *
+     *  We don't filter on clientUid because getClientUid() is also `@hide`.
+     *  Restricting on CONTENT_TYPE_{MUSIC,MOVIE,SPEECH} excludes our app's
+     *  own silent AAudio stream, which uses CONTENT_TYPE_UNKNOWN. */
+    private fun hasSilentRestrictedPlayback(audioMgr: AudioManager): Boolean {
+        for (cfg in audioMgr.activePlaybackConfigurations) {
+            val attrs = cfg.audioAttributes
+            val usage = attrs.usage
+            if (usage != AudioAttributes.USAGE_MEDIA &&
+                usage != AudioAttributes.USAGE_GAME &&
+                usage != AudioAttributes.USAGE_UNKNOWN) continue
+            val s = attrs.toString()
+            if (s.contains("FLAG_NO_MEDIA_PROJECTION") &&
+                (s.contains("CONTENT_TYPE_MUSIC") ||
+                 s.contains("CONTENT_TYPE_MOVIE") ||
+                 s.contains("CONTENT_TYPE_SPEECH"))) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /** True iff there is an active playback configuration with a matching
+     *  usage that does NOT have FLAG_NO_MEDIA_PROJECTION. Used by mic-mode
+     *  polling to offer a switch back to the higher-quality projection path. */
+    private fun hasUnflaggedPlayback(audioMgr: AudioManager): Boolean {
+        for (cfg in audioMgr.activePlaybackConfigurations) {
+            val attrs = cfg.audioAttributes
+            val usage = attrs.usage
+            if (usage != AudioAttributes.USAGE_MEDIA &&
+                usage != AudioAttributes.USAGE_GAME &&
+                usage != AudioAttributes.USAGE_UNKNOWN) continue
+            val s = attrs.toString()
+            if (!s.contains("FLAG_NO_MEDIA_PROJECTION") &&
+                (s.contains("CONTENT_TYPE_MUSIC") ||
+                 s.contains("CONTENT_TYPE_MOVIE") ||
+                 s.contains("CONTENT_TYPE_SPEECH") ||
+                 s.contains("CONTENT_TYPE_UNKNOWN"))) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun startMicReader() {
+        // Mic-source AudioRecord. Bypasses AudioPlaybackCapture and is therefore
+        // immune to FLAG_NO_MEDIA_PROJECTION (Spotify, Chrome WAV) opt-outs.
+        // Quality is degraded by speaker→mic acoustic path + ambient pickup.
+        val format = AudioFormat.Builder()
+            .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+            .setSampleRate(SAMPLE_RATE)
+            .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+            .build()
+        val minBytes = AudioRecord.getMinBufferSize(
+            SAMPLE_RATE,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_FLOAT
+        )
+        val bytesPerFrame = 4 // 1 channel x 4 bytes/float
+        val bufferBytes = maxOf(minBytes, FRAMES_PER_CHUNK * bytesPerFrame)
+        record = AudioRecord.Builder()
+            .setAudioSource(MediaRecorder.AudioSource.MIC)
+            .setAudioFormat(format)
+            .setBufferSizeInBytes(bufferBytes)
+            .build()
+        // Attach the OS-level Automatic Gain Control + Noise Suppressor audio
+        // effects to this AudioRecord session. AGC normalises mic input across
+        // wildly different speaker volumes and source-to-mic distances so the
+        // visualisation stays usable as songs / playback volume change. NS
+        // reduces ambient room noise that would otherwise dominate quiet
+        // passages. Both are best-effort: not every device implements them.
+        record?.audioSessionId?.let { sessionId ->
+            if (AutomaticGainControl.isAvailable()) {
+                try {
+                    AutomaticGainControl.create(sessionId)?.enabled = true
+                } catch (_: Throwable) { /* effect unavailable on this device */ }
+            }
+            if (NoiseSuppressor.isAvailable()) {
+                try {
+                    NoiseSuppressor.create(sessionId)?.enabled = true
+                } catch (_: Throwable) { /* effect unavailable on this device */ }
+            }
+        }
+        record?.startRecording()
+        running = true
+
+        val audioMgr = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val myToken = tokenSeq.incrementAndGet()
+        latestToken = myToken
+
+        thread = Thread({
+            val mono = FloatArray(FRAMES_PER_CHUNK)
+            // Emit STEREO bytes (duplicate mono into L+R) so the JS path
+            // (which expects interleaved stereo) stays unchanged.
+            val byteBuf = ByteBuffer.allocate(FRAMES_PER_CHUNK * 2 * 4).order(ByteOrder.LITTLE_ENDIAN)
+            // Poll for an unflagged source every ~2 minutes. 48000 / 1024 ≈
+            // 47 chunks per second, so ~5500 chunks per 2 minutes. Rate-limit
+            // re-firings to one per ~10 min so a single steady-unflagged
+            // session (user playing VLC) does not spam the banner.
+            val POLL_INTERVAL_CHUNKS = 5500
+            val RATE_LIMIT_CHUNKS = 27500
+            var chunkCount = 0
+            var lastFiredCount = Int.MIN_VALUE / 2
+            while (running && myToken == latestToken) {
+                val n = record?.read(mono, 0, mono.size, AudioRecord.READ_BLOCKING) ?: -1
+                if (n <= 0) continue
+                chunkCount++
+                if (chunkCount % POLL_INTERVAL_CHUNKS == 0 &&
+                    (chunkCount - lastFiredCount) > RATE_LIMIT_CHUNKS &&
+                    hasUnflaggedPlayback(audioMgr)) {
+                    lastFiredCount = chunkCount
+                    if (myToken == latestToken) {
+                        pluginRef?.notifyUnrestrictedAvailable()
+                    }
+                }
+                byteBuf.clear()
+                for (i in 0 until n) {
+                    byteBuf.putFloat(mono[i])
+                    byteBuf.putFloat(mono[i])
+                }
+                byteBuf.flip()
+                val bytes = ByteArray(byteBuf.remaining())
+                byteBuf.get(bytes)
+                val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                if (myToken == latestToken) {
+                    pluginRef?.emitPcmChunk(b64)
+                }
+            }
+        }, "ScopeMicReader").also { it.start() }
     }
 
     override fun onDestroy() {
@@ -127,7 +329,7 @@ class AudioCaptureService : Service() {
         super.onDestroy()
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(text: String = "Capturing audio"): Notification {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (nm.getNotificationChannel(CHANNEL_ID) == null) {
             val ch = NotificationChannel(
@@ -141,7 +343,7 @@ class AudioCaptureService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle("Scope")
-            .setContentText("Capturing audio")
+            .setContentText(text)
             .setOngoing(true)
             .build()
     }

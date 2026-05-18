@@ -81,6 +81,7 @@ const state = {
   bandGain: { bass: 1.0, mid: 1.0, treb: 1.0 },
   autoGain: true,         // ON: envelope follower normalises; slider disabled
   keepScreenOn: true,     // ON: request Wake Lock + Android FLAG_KEEP_SCREEN_ON
+  micMode: false,         // ON: capture via mic (works for DRM-flagged sources, degraded quality)
   audioAnalysis: null,    // createAudioAnalysis instance, set after analysers up
   audio: { bass: 0, mid: 0, treb: 0, bassAtt: 0, beat: false, beatPulse: 0, longAverage: 0 },
   screenLock: null,       // WakeLockSentinel; set by requestScreenLock
@@ -91,6 +92,10 @@ const TARGET_LEVEL = 0.3;
 const MIN_LONG = 1e-4;
 const GAIN_MIN = 0.1;
 const GAIN_MAX = 2.0;
+// Mic-mode auto-gain range. Speaker -> phone-mic acoustic loop is much
+// quieter and more variable across songs and volume settings than a direct
+// system-audio tap, so the envelope follower needs more headroom.
+const GAIN_MAX_MIC = 12.0;
 const AUTO_GAIN_LERP = 0.05;
 
 const audio = {
@@ -118,6 +123,8 @@ const audio = {
   workletNode: null,
   silence: null,
   audioChunkHandle: null,
+  silentCaptureHandle: null,
+  unrestrictedHandle: null,
 };
 
 const pixi = {
@@ -361,9 +368,15 @@ async function startCaptureAndroid() {
     return;
   }
 
-  // Now ask for MediaProjection permission.
+  // Pick source: mic-mode bypasses AudioPlaybackCapture (and the
+  // FLAG_NO_MEDIA_PROJECTION opt-out apps set on their tracks). System mode
+  // uses MediaProjection (better quality, blocked by opt-out apps).
   try {
-    await plugin.startCapture();
+    if (state.micMode) {
+      await plugin.startMicCapture();
+    } else {
+      await plugin.startCapture();
+    }
   } catch (err) {
     setStatus(`Capture denied: ${err.message || "permission rejected"}`);
     if (audio.ctx) { try { await audio.ctx.close(); } catch (_e) {} audio.ctx = null; }
@@ -412,6 +425,11 @@ async function startCaptureAndroid() {
     // Capacitor contract: addListener returns Promise<PluginListenerHandle>
     // where the handle has remove(): Promise<void>. Both calls awaited.
     audio.audioChunkHandle = await plugin.addListener("audioChunk", onAudioChunkAndroid);
+    // Native service notifies us when projection-mode capture stays silent
+    // while another app is actively playing (FLAG_NO_MEDIA_PROJECTION) or,
+    // in mic mode, when an unflagged source becomes available again.
+    audio.silentCaptureHandle = await plugin.addListener("silentCapture", onSilentCapture);
+    audio.unrestrictedHandle = await plugin.addListener("unrestrictedAvailable", onUnrestrictedAvailable);
   } catch (err) {
     setStatus(`Graph wire-up failed: ${err.message || err}`);
     if (audio.ctx) { try { await audio.ctx.close(); } catch (_e) {} audio.ctx = null; }
@@ -461,6 +479,70 @@ function onAudioChunkAndroid(event) {
   }
 }
 
+// Called by native service when projection-mode capture is silent (zero PCM
+// for ~1s) while another app is actively playing matching audio. The track
+// is opted out via FLAG_NO_MEDIA_PROJECTION. Offer mic-mode fallback.
+function onSilentCapture() {
+  showCaptureBanner({
+    text: "This audio source can't be captured by Scope (DRM-protected). Use the phone's microphone instead?",
+    accept: "Use microphone",
+    onAccept: async () => {
+      hideCaptureBanner();
+      state.micMode = true;
+      // Tear down current capture, restart via mic path. The plugin's
+      // startMicCapture handles RECORD_AUDIO permission on first call.
+      await stopCaptureAndroid();
+      await startCaptureAndroid();
+    },
+  });
+}
+
+// Called by native service when mic-mode polling finds an unflagged source.
+function onUnrestrictedAvailable() {
+  if (!state.micMode) return;
+  showCaptureBanner({
+    text: "An unrestricted audio source is now playing. Switch back to higher-quality system audio?",
+    accept: "Switch back",
+    onAccept: async () => {
+      hideCaptureBanner();
+      state.micMode = false;
+      await stopCaptureAndroid();
+      await startCaptureAndroid();
+    },
+  });
+}
+
+function showCaptureBanner({ text, accept, onAccept }) {
+  let el = document.getElementById("capture-banner");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "capture-banner";
+    document.body.appendChild(el);
+  }
+  el.textContent = "";
+  const msg = document.createElement("span");
+  msg.textContent = text;
+  msg.className = "capture-banner-msg";
+  const btn = document.createElement("button");
+  btn.textContent = accept;
+  btn.className = "capture-banner-accept";
+  btn.addEventListener("click", onAccept);
+  const dismiss = document.createElement("button");
+  dismiss.textContent = "×";
+  dismiss.className = "capture-banner-dismiss";
+  dismiss.setAttribute("aria-label", "Dismiss");
+  dismiss.addEventListener("click", hideCaptureBanner);
+  el.appendChild(msg);
+  el.appendChild(btn);
+  el.appendChild(dismiss);
+  el.hidden = false;
+}
+
+function hideCaptureBanner() {
+  const el = document.getElementById("capture-banner");
+  if (el) el.hidden = true;
+}
+
 async function stopCaptureAndroid() {
   releaseScreenLock();
   setKeepScreenOnAndroid(false);
@@ -468,6 +550,14 @@ async function stopCaptureAndroid() {
   if (audio.audioChunkHandle && audio.audioChunkHandle.remove) {
     await audio.audioChunkHandle.remove();
     audio.audioChunkHandle = null;
+  }
+  if (audio.silentCaptureHandle && audio.silentCaptureHandle.remove) {
+    await audio.silentCaptureHandle.remove();
+    audio.silentCaptureHandle = null;
+  }
+  if (audio.unrestrictedHandle && audio.unrestrictedHandle.remove) {
+    await audio.unrestrictedHandle.remove();
+    audio.unrestrictedHandle = null;
   }
   const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
   if (plugin) {
@@ -610,9 +700,10 @@ function frameBody() {
   // unit mismatch that drove gain to the floor on first frame.
   if (state.autoGain && audio.gain && state.audio.rmsLongAverage > 0) {
     const longAvg = Math.max(MIN_LONG, state.audio.rmsLongAverage);
+    const gainCeil = state.micMode ? GAIN_MAX_MIC : GAIN_MAX;
     let targetGain = TARGET_LEVEL / longAvg;
     if (targetGain < GAIN_MIN) targetGain = GAIN_MIN;
-    else if (targetGain > GAIN_MAX) targetGain = GAIN_MAX;
+    else if (targetGain > gainCeil) targetGain = gainCeil;
     const current = audio.gain.gain.value;
     audio.gain.gain.value = current + (targetGain - current) * AUTO_GAIN_LERP;
   }
