@@ -15,31 +15,17 @@ function createWindow() {
     title: "Scope",
     icon: path.join(__dirname, "..", "icon-512.png"),
     webPreferences: {
-      // No node integration in the renderer - the page is plain web code.
+      // Renderer uses only Web APIs (navigator.mediaDevices, AudioContext,
+      // AudioWorklet, WebGL via PIXI). No Electron-side IPC bridge is
+      // needed, so the recommended security defaults stay on. If a future
+      // change ever needs to call out to the main process, add a preload
+      // script with contextBridge — do not flip these flags.
       nodeIntegration: false,
       contextIsolation: true,
-      // Audio is the whole point; disable autoplay restrictions so the
-      // visualiser starts producing without a user-gesture-per-source.
+      // Explicit even though local-file loads are typically trusted: keeps
+      // behaviour identical to the browser build's no-gesture-needed flow.
       autoplayPolicy: "no-user-gesture-required",
     },
-  });
-
-  // navigator.mediaDevices.getDisplayMedia in Electron triggers a source
-  // picker. Intercept it and return the system / entire-screen source so
-  // the user does not have to pick a window each session - matches the
-  // Android "Entire screen" pin behaviour.
-  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
-    desktopCapturer.getSources({ types: ["screen"] }).then((sources) => {
-      const screenSource = sources[0];
-      if (!screenSource) {
-        callback({});
-        return;
-      }
-      // Audio: "loopback" pulls system audio mix on Windows; on macOS/Linux
-      // Electron will fall back to no audio if the platform does not
-      // support loopback. The desktop README documents this limitation.
-      callback({ video: screenSource, audio: "loopback" });
-    }).catch(() => callback({}));
   });
 
   win.loadFile(path.join(__dirname, "..", "index.html"));
@@ -67,7 +53,28 @@ function createWindow() {
   ]));
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // Install the display-media request handler ONCE on the default session,
+  // before any window is created. Subsequent windows from app.on("activate")
+  // share defaultSession so they reuse this handler. navigator.mediaDevices
+  // .getDisplayMedia in Electron would otherwise pop a per-source picker;
+  // here we return the entire-screen source with loopback audio so the user
+  // does not pick a source each launch (analogue of Android's "Entire
+  // screen" pin). Loopback audio: Windows captures system mix; macOS and
+  // Linux fall back to video-only because Electron does not currently
+  // support loopback there - documented in README.
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    desktopCapturer.getSources({ types: ["screen"] }).then((sources) => {
+      const screenSource = sources[0];
+      if (!screenSource) {
+        callback({});
+        return;
+      }
+      callback({ video: screenSource, audio: "loopback" });
+    }).catch(() => callback({}));
+  });
+  createWindow();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
