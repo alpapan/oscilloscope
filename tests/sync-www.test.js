@@ -30,7 +30,7 @@ function parseSyncList() {
 
 function rootJsFiles() {
   return fs.readdirSync(ROOT)
-    .filter(name => name.endsWith(".js") && !name.endsWith(".test.js"))
+    .filter(name => name.endsWith(".js") && !name.endsWith(".test.js") && name !== "playwright.config.js")
     .filter(name => fs.statSync(path.join(ROOT, name)).isFile());
 }
 

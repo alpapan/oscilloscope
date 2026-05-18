@@ -39,6 +39,9 @@ android {
             outputFileName = "scope-${variant.versionName}.apk"
         }
     }
+    kotlinOptions {
+        jvmTarget = '21'
+    }
 }
 
 repositories {
