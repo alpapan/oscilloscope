@@ -148,6 +148,33 @@ npm run dist:mac       # produces dist/Scope-0.3.0.dmg
 npm run dist:linux     # produces dist/Scope-0.3.0.AppImage
 ```
 
+### Signed Windows build
+
+Generate a self-signed code-signing cert (one-time) then sign installers on
+every build. Full notes: `docs/build-signed.md`.
+
+```bash
+# Prereqs (one-time)
+sudo apt-get install -y wine64 wine-binfmt mono-devel openssl osslsigncode
+
+# Generate the cert (one-time)
+./scripts/generate-signing-cert.sh
+
+# Each build
+export CSC_LINK="file://$HOME/.scope-signing/scope-signing.pfx"
+export CSC_KEY_PASSWORD='your-cert-password'
+npm run dist:win
+npm run verify:win
+```
+
+The installer is signed with the publisher CN baked into the cert (default
+"Alexie Papanicolaou" — override via `SCOPE_CERT_CN` env var when running
+the generator). To make Windows show that publisher name on UAC/SmartScreen
+instead of "Unknown publisher", import the public `scope-signing.crt` into
+the target user's `TrustedPublisher` cert store. Without that import,
+SmartScreen warns once on first install (self-signed certs have no
+reputation); users click "More info → Run anyway".
+
 ## Hotkeys
 
 | Key | Action |
