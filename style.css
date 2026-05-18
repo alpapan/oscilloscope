@@ -76,6 +76,30 @@
 }
 #capture-toast[hidden] { display: none; }
 
+#capture-mode-badge {
+  position: fixed;
+  top: max(60px, calc(env(safe-area-inset-top, 0px) + 8px));
+  right: calc(env(safe-area-inset-right, 0px) + 8px);
+  z-index: 9002;
+  background: rgba(0, 0, 0, 0.65);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font: 700 11px/1 system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+#capture-mode-badge[hidden] { display: none; }
+#capture-mode-badge.badge-system {
+  color: #b6f0d2;
+  border: 1px solid #2a8;
+  box-shadow: 0 0 8px rgba(42, 170, 136, 0.5);
+}
+#capture-mode-badge.badge-mic {
+  color: #ffe3a3;
+  border: 1px solid #d9b85a;
+  box-shadow: 0 0 8px rgba(217, 184, 90, 0.5);
+}
+
 html, body {
   margin: 0;
   padding: 0;

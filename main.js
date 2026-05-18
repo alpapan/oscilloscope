@@ -452,6 +452,7 @@ async function startCaptureAndroid() {
   setStatus("");
   document.getElementById("mobile-start").hidden = true;
   applyState();
+  updateCaptureModeBadge();
   requestAnimationFrame(frame);
 }
 
@@ -529,6 +530,28 @@ async function autoSwitchToMode(micMode, toastText) {
   await stopCaptureAndroid();
   await new Promise(resolve => setTimeout(resolve, 50));
   await startCaptureAndroid();
+  // (startCaptureAndroid already calls updateCaptureModeBadge after
+  // flipping state.running, so no explicit call needed here.)
+}
+
+// Persistent "SYSTEM" / "MIC" pill in the top-right that shows which source
+// the visualisation is reading from. Hidden when capture is not running.
+function updateCaptureModeBadge() {
+  let el = document.getElementById("capture-mode-badge");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "capture-mode-badge";
+    document.body.appendChild(el);
+  }
+  if (!state.running) { el.hidden = true; return; }
+  el.hidden = false;
+  if (state.micMode) {
+    el.textContent = "MIC";
+    el.className = "badge-mic";
+  } else {
+    el.textContent = "SYSTEM";
+    el.className = "badge-system";
+  }
 }
 
 let captureToastTimer = null;
@@ -606,6 +629,7 @@ async function stopCaptureAndroid() {
   audio.eqSum = audio.eqSplitter = audio.eqAnalyserL = audio.eqAnalyserR = null;
   state.audioAnalysis = null;
   state.running = false;
+  updateCaptureModeBadge();
   if (typeof document !== "undefined") {
     document.getElementById("mobile-start").hidden = false;
   }
