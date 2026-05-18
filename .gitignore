@@ -25,3 +25,9 @@ dist/
 *.pfx
 *.key
 scope-signing.crt
+
+# Playwright + ad-hoc test output
+test-results/
+
+# Session handoff notes - local-only working state, not for the repo
+docs/HANDOFF-*.md
