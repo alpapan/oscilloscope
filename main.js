@@ -18,6 +18,15 @@ function findZeroCrossing(buf) {
   return 0;
 }
 
+// Pure (DOM-free, testable) projection of state -> badge props. Centralises
+// the rule that the badge is hidden while not capturing, and that micMode is
+// the single source of truth for which source the badge reflects.
+function nextCaptureModeBadgeProps(s) {
+  if (!s || !s.running) return { hidden: true, text: "", className: "" };
+  if (s.micMode) return { hidden: false, text: "MIC", className: "badge-mic" };
+  return { hidden: false, text: "SYSTEM", className: "badge-system" };
+}
+
 // =============================================================================
 // Platform detection (Android via Capacitor vs desktop browser)
 // =============================================================================
@@ -543,14 +552,11 @@ function updateCaptureModeBadge() {
     el.id = "capture-mode-badge";
     document.body.appendChild(el);
   }
-  if (!state.running) { el.hidden = true; return; }
-  el.hidden = false;
-  if (state.micMode) {
-    el.textContent = "MIC";
-    el.className = "badge-mic";
-  } else {
-    el.textContent = "SYSTEM";
-    el.className = "badge-system";
+  const props = nextCaptureModeBadgeProps(state);
+  el.hidden = props.hidden;
+  if (!props.hidden) {
+    el.textContent = props.text;
+    el.className = props.className;
   }
 }
 
@@ -1073,7 +1079,11 @@ async function init() {
       window.cycleView = function (direction) {
         MobileUI.cycleView(direction, state, applyState);
       };
-      // Capacitor App backButton: drawer-close > stop-capture > exit.
+      // Capacitor App backButton: drawer-close > stop-capture > confirm-exit.
+      // Android 14+ edge-swipes commit to back-gesture early, so users
+      // attempting to swipe-from-right to open the settings drawer can
+      // accidentally trigger this. Show a confirmation banner before
+      // committing to exit so an unintended swipe is recoverable.
       if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
         window.Capacitor.Plugins.App.addListener("backButton", () => {
           if (MobileUI.isDrawerOpen()) {
@@ -1084,7 +1094,14 @@ async function init() {
             stopCapture();
             return;
           }
-          window.Capacitor.Plugins.App.exitApp();
+          showCaptureBanner({
+            text: "Exit Scope?",
+            accept: "Exit",
+            onAccept: () => {
+              hideCaptureBanner();
+              window.Capacitor.Plugins.App.exitApp();
+            },
+          });
         });
       }
       return;
@@ -1206,5 +1223,5 @@ if (typeof window !== "undefined") {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { freqToX, findZeroCrossing };
+  module.exports = { freqToX, findZeroCrossing, nextCaptureModeBadgeProps };
 }
