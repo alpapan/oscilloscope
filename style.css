@@ -7,6 +7,99 @@
 
 * { box-sizing: border-box; }
 
+#capture-banner {
+  position: fixed;
+  /* max() guards against devices where env(safe-area-inset-top) returns 0 even
+     though there is a camera cutout — fall back to 60px clearance. */
+  top: max(60px, calc(env(safe-area-inset-top, 0px) + 8px));
+  left: calc(env(safe-area-inset-left, 0px) + 8px);
+  right: calc(env(safe-area-inset-right, 0px) + 8px);
+  z-index: 9000;
+  background: rgba(20, 20, 24, 0.92);
+  color: #f0f0f0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font: 14px/1.3 system-ui, sans-serif;
+  /* Banner needs to receive taps even if a sibling sets pointer-events:none.
+     touch-action:manipulation kills the 300ms tap delay on Android WebView. */
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#capture-banner * { pointer-events: auto; touch-action: manipulation; }
+#capture-banner[hidden] { display: none; }
+.capture-banner-msg { flex: 1; }
+/* Buttons enlarged to Android's recommended 48dp minimum hit target. */
+.capture-banner-accept {
+  background: #2a8;
+  color: #fff;
+  border: 0;
+  padding: 14px 18px;
+  min-width: 96px;
+  min-height: 48px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+}
+.capture-banner-dismiss {
+  background: transparent;
+  color: #ccc;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  font-size: 22px;
+  min-width: 48px;
+  min-height: 48px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.capture-banner-dismiss:active,
+.capture-banner-accept:active { background: rgba(255, 255, 255, 0.12); }
+
+#capture-toast {
+  position: fixed;
+  top: max(60px, calc(env(safe-area-inset-top, 0px) + 8px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9001;
+  background: rgba(20, 20, 24, 0.95);
+  color: #f0f0f0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 10px 18px;
+  font: 14px/1.3 system-ui, sans-serif;
+  pointer-events: none;
+}
+#capture-toast[hidden] { display: none; }
+
+#capture-mode-badge {
+  position: fixed;
+  top: max(60px, calc(env(safe-area-inset-top, 0px) + 8px));
+  right: calc(env(safe-area-inset-right, 0px) + 8px);
+  z-index: 9002;
+  background: rgba(0, 0, 0, 0.65);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font: 700 11px/1 system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+#capture-mode-badge[hidden] { display: none; }
+#capture-mode-badge.badge-system {
+  color: #b6f0d2;
+  border: 1px solid #2a8;
+  box-shadow: 0 0 8px rgba(42, 170, 136, 0.5);
+}
+#capture-mode-badge.badge-mic {
+  color: #ffe3a3;
+  border: 1px solid #d9b85a;
+  box-shadow: 0 0 8px rgba(217, 184, 90, 0.5);
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -100,3 +193,217 @@ html, body {
 #controls:hover {
   opacity: 1;
 }
+
+/* =========================================================================
+   Mobile UI (body.mobile)
+   ========================================================================= */
+
+/* Hide desktop start-screen and controls on Android.
+   Both selectors cover the case where JS later sets the [hidden] attribute too;
+   the attribute-selector form is included for defensiveness even though
+   `body.mobile #start-screen` (0,1,1,1) already outranks `#start-screen[hidden]`
+   (0,1,1,0) in CSS specificity. */
+body.mobile #controls,
+body.mobile #start-screen,
+body.mobile #controls[hidden],
+body.mobile #start-screen[hidden] { display: none; }
+
+#mobile-start {
+  position: fixed;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--fg);
+  text-align: center;
+  font-family: system-ui, -apple-system, sans-serif;
+  z-index: 10;
+}
+body.mobile #mobile-start { display: flex; }
+body.mobile #mobile-start[hidden] { display: none; }
+
+#mobile-start h1 {
+  margin: 0;
+  font-size: 48px;
+  letter-spacing: 4px;
+}
+#mobile-capture {
+  padding: 16px 32px;
+  font-size: 20px;
+  background: var(--fg);
+  color: var(--bg);
+  border: none;
+  border-radius: 8px;
+  min-height: 56px;
+  min-width: 220px;
+  cursor: pointer;
+}
+#mobile-capture:active { opacity: 0.7; }
+
+#mobile-toast {
+  position: fixed;
+  top: env(safe-area-inset-top, 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--fg);
+  border: 1px solid var(--fg);
+  border-radius: 16px;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  letter-spacing: 1px;
+  pointer-events: none;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+#mobile-toast.visible { opacity: 1; }
+
+#mobile-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 30;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+/* Override the [hidden] attribute on Android so the element actually
+   renders. Visibility is controlled via opacity + pointer-events above. */
+body.mobile #mobile-backdrop,
+body.mobile #mobile-backdrop[hidden] { display: block; }
+body.drawer-open #mobile-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#mobile-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(80vw, 360px);
+  padding: env(safe-area-inset-top, 16px) 20px 20px;
+  background: var(--bg);
+  color: var(--fg);
+  border-left: 1px solid var(--fg);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow-y: auto;
+  transform: translateX(100%);
+  transition: transform 220ms ease;
+  z-index: 40;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+body.drawer-open #mobile-drawer { transform: translateX(0); }
+
+#mobile-drawer section { display: flex; flex-direction: column; gap: 8px; }
+#mobile-drawer h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  opacity: 0.7;
+}
+
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+.drawer-title {
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  letter-spacing: 3px !important;
+  opacity: 1 !important;
+}
+#mobile-drawer-close {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--fg);
+  border-radius: 6px;
+  font-size: 18px;
+  cursor: pointer;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  line-height: 1;
+}
+#mobile-drawer-close:active { opacity: 0.6; }
+
+.chips { display: flex; gap: 8px; }
+.chip {
+  flex: 1;
+  padding: 12px 0;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--fg);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  min-height: 44px;
+}
+.chip.active {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--fg);
+  border-radius: 6px;
+  padding: 4px;
+}
+.stepper button {
+  background: transparent;
+  color: var(--fg);
+  border: none;
+  font-size: 18px;
+  padding: 8px 16px;
+  cursor: pointer;
+  min-width: 44px;
+  min-height: 44px;
+}
+.stepper span {
+  flex: 1;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+#mobile-drawer input[type="range"] {
+  width: 100%;
+  height: 32px;
+}
+
+#mobile-stop {
+  margin-top: auto;
+  padding: 16px;
+  background: var(--fg);
+  color: var(--bg);
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  min-height: 56px;
+}
+
+/* In PiP mode hide all overlays; canvas only. */
+body.pip #mobile-start,
+body.pip #mobile-drawer,
+body.pip #mobile-backdrop,
+body.pip #mobile-toast { display: none !important; }

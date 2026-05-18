@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Scope</title>
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="icon" type="image/x-icon" href="favicon.ico" sizes="16x16 32x32 48x48">
@@ -40,8 +40,10 @@
       </select>
     </label>
     <label>Sensitivity
-      <input id="gain" type="range" min="0.1" max="4" step="0.1" value="1">
+      <input id="gain" type="range" min="0.1" max="2" step="0.05" value="1">
     </label>
+    <label><input id="autogain" type="checkbox" checked> Auto-gain</label>
+    <label><input id="keepawake" type="checkbox" checked> Keep screen on</label>
     <details>
       <summary>Advanced</summary>
       <label>FFT size
@@ -52,16 +54,88 @@
         </select>
       </label>
       <label>Smoothing
-        <input id="smooth" type="range" min="0" max="0.95" step="0.05" value="0.6">
+        <input id="smooth" type="range" min="0.65" max="0.95" step="0.01" value="0.8">
+      </label>
+      <label>EQ Bass
+        <input id="eq-bass" type="range" min="0" max="2" step="0.05" value="1">
+      </label>
+      <label>EQ Mid
+        <input id="eq-mid" type="range" min="0" max="2" step="0.05" value="1">
+      </label>
+      <label>EQ Treble
+        <input id="eq-treb" type="range" min="0" max="2" step="0.05" value="1">
       </label>
     </details>
   </div>
-  <div id="start-screen">
+  <div id="start-screen" hidden>
     <h1>Scope</h1>
     <p>A music oscilloscope. Open Spotify Web Player or YouTube in another tab, then click Start and share that tab with audio.</p>
     <button id="capture" type="button">Start capture</button>
     <p id="status"></p>
   </div>
+
+  <div id="mobile-start" hidden>
+    <h1>Scope</h1>
+    <p>A music oscilloscope.</p>
+    <button id="mobile-capture" type="button">Start capture</button>
+    <p><strong>Start capture</strong> will capture the sound of any app. Use your music app to stream sound and come back here.</p>
+    <p>Double-tap the visualiser to cycle views. Swipe left for settings.</p>
+    <p id="mobile-status"></p>
+  </div>
+
+  <div id="mobile-toast" hidden></div>
+
+  <div id="mobile-backdrop" hidden></div>
+  <aside id="mobile-drawer" hidden>
+    <header class="drawer-header">
+      <h2 class="drawer-title">Settings</h2>
+      <button id="mobile-drawer-close" type="button" aria-label="Close settings">&#x2715;</button>
+    </header>
+    <section>
+      <h2>Theme</h2>
+      <div id="mobile-theme-chips" class="chips">
+        <button type="button" data-theme="crt" class="chip">CRT</button>
+        <button type="button" data-theme="neon" class="chip">Neon</button>
+        <button type="button" data-theme="mono" class="chip">Mono</button>
+      </div>
+    </section>
+    <section>
+      <h2>Sensitivity</h2>
+      <input id="mobile-gain" type="range" min="0.1" max="2" step="0.05" value="1">
+    </section>
+    <section>
+      <label class="toggle"><input id="mobile-autogain" type="checkbox" checked> Auto-gain</label>
+    </section>
+    <section>
+      <label class="toggle"><input id="mobile-keepawake" type="checkbox" checked> Keep screen on</label>
+    </section>
+    <section>
+      <label class="toggle"><input id="mobile-micmode" type="checkbox"> Microphone capture (for DRM-protected music; e.g. Spotify)</label>
+    </section>
+    <section>
+      <label class="toggle"><input id="mobile-micmode-auto" type="checkbox"> Auto-switch to microphone when source is protected</label>
+    </section>
+    <section>
+      <h2>FFT size</h2>
+      <div class="stepper">
+        <button type="button" id="mobile-fft-prev" aria-label="Previous">&#9664;</button>
+        <span id="mobile-fft-value">2048</span>
+        <button type="button" id="mobile-fft-next" aria-label="Next">&#9654;</button>
+      </div>
+    </section>
+    <section>
+      <h2>Smoothing</h2>
+      <input id="mobile-smooth" type="range" min="0.65" max="0.95" step="0.01" value="0.8">
+    </section>
+    <section>
+      <h2>EQ for visualisation</h2>
+      <label>Bass <input id="mobile-eq-bass" type="range" min="0" max="2" step="0.05" value="1"></label>
+      <label>Mid <input id="mobile-eq-mid" type="range" min="0" max="2" step="0.05" value="1"></label>
+      <label>Treble <input id="mobile-eq-treb" type="range" min="0" max="2" step="0.05" value="1"></label>
+    </section>
+    <button id="mobile-stop" type="button" class="stop">Stop capture</button>
+    <button id="mobile-exit" type="button" class="stop">Exit app</button>
+  </aside>
   <script type="module">
     // pixi-filters@6 ships no UMD/IIFE browser bundle, so it loads via
     // ESM from esm.sh. The `?external=pixi.js` parameter tells esm.sh to
@@ -76,5 +150,11 @@
     s.src = 'main.js';
     document.body.appendChild(s);
   </script>
+  <script src="audio-ring-buffer.js"></script>
+  <script src="swipe-detector.js"></script>
+  <script src="audio-features.js"></script>
+  <script src="palette-color.js"></script>
+  <script src="mesh-warp.js"></script>
+  <script src="mobile-ui.js"></script>
 </body>
 </html>

@@ -1,0 +1,84 @@
+{
+  "name": "scope",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Scope music oscilloscope - Android + Electron + browser",
+  "main": "electron/main.js",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "playwright test",
+    "serve": "http-server -p 8000 --cors -c-1",
+    "electron": "electron .",
+    "dist:win": "electron-builder --win nsis",
+    "verify:win": "osslsigncode verify -CAfile ~/.scope-signing/scope-signing.crt -in 'dist/Scope Setup 0.3.0.exe'",
+    "dist:linux": "electron-builder --linux AppImage",
+    "dist:mac": "electron-builder --mac dmg",
+    "sync-www": "./sync-www.sh",
+    "presync": "npm run sync-www",
+    "sync": "cap sync android",
+    "prebuild:android": "npm run sync-www",
+    "build:android": "cap sync android && cd android && ./gradlew :app:assembleRelease"
+  },
+  "build": {
+    "appId": "com.alpapan.scope",
+    "productName": "Scope",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**",
+      "index.html",
+      "main.js",
+      "style.css",
+      "pixi-shim.js",
+      "audio-ring-buffer.js",
+      "audio-worklet-processor.js",
+      "audio-features.js",
+      "palette-color.js",
+      "mesh-warp.js",
+      "swipe-detector.js",
+      "mobile-ui.js",
+      "manifest.webmanifest",
+      "icon.svg",
+      "icon-192.png",
+      "icon-512.png",
+      "favicon.ico"
+    ],
+    "win": {
+      "icon": "icon-512.png",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "signtoolOptions": {
+        "rfc3161TimeStampServer": "http://timestamp.digicert.com",
+        "timeStampServer": "http://timestamp.digicert.com",
+        "sign": "scripts/sign-win.js"
+      }
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "icon": "icon-512.png",
+      "category": "AudioVideo"
+    },
+    "mac": {
+      "icon": "icon-512.png",
+      "category": "public.app-category.music"
+    }
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/app": "^7.0.0",
+    "@capacitor/core": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
+    "@playwright/test": "^1.60.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "http-server": "^14.1.1"
+  }
+}

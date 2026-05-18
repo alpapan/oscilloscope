@@ -1,0 +1,237 @@
+// Browser-only. Loaded via plain <script> tag in index.html before main.js.
+// Exposes `window.MobileUI` with helpers used by main.js when PLATFORM === "android".
+
+(function () {
+  if (typeof window === "undefined") return;
+
+  const FFT_VALUES = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768];
+  const VIEWS = ["waveform", "spectrum", "lissajous"];
+  const VIEW_LABELS = { waveform: "Waveform", spectrum: "Spectrum", lissajous: "Lissajous" };
+
+  let toastTimer = null;
+
+  function showToast(text) {
+    const el = document.getElementById("mobile-toast");
+    if (!el) return;
+    el.textContent = text;
+    el.hidden = false;
+    el.classList.add("visible");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      el.classList.remove("visible");
+    }, 1500);
+  }
+
+  function openDrawer() {
+    document.body.classList.add("drawer-open");
+  }
+  function closeDrawer() {
+    document.body.classList.remove("drawer-open");
+  }
+  function isDrawerOpen() {
+    return document.body.classList.contains("drawer-open");
+  }
+
+  function cycleView(direction, state, applyState) {
+    const i = VIEWS.indexOf(state.view);
+    const next = (i + direction + VIEWS.length) % VIEWS.length;
+    state.view = VIEWS[next];
+    applyState();
+    showToast(VIEW_LABELS[state.view]);
+  }
+
+  function refreshDrawer(state) {
+    document.querySelectorAll("#mobile-theme-chips .chip").forEach(b => {
+      b.classList.toggle("active", b.dataset.theme === state.theme);
+    });
+    const gain = document.getElementById("mobile-gain");
+    if (gain) {
+      gain.value = state.sensitivity;
+      gain.disabled = !!state.autoGain;
+    }
+    const fftSpan = document.getElementById("mobile-fft-value");
+    if (fftSpan) fftSpan.textContent = state.fftSize;
+    const smooth = document.getElementById("mobile-smooth");
+    if (smooth) smooth.value = state.smoothing;
+    const auto = document.getElementById("mobile-autogain");
+    if (auto) auto.checked = !!state.autoGain;
+    const keep = document.getElementById("mobile-keepawake");
+    if (keep) keep.checked = !!state.keepScreenOn;
+    for (const band of ["bass", "mid", "treb"]) {
+      const el = document.getElementById(`mobile-eq-${band}`);
+      if (el) el.value = String(state.bandGain[band]);
+    }
+  }
+
+  function wireDrawer(state, applyState) {
+    document.querySelectorAll("#mobile-theme-chips .chip").forEach(b => {
+      b.addEventListener("click", () => {
+        state.theme = b.dataset.theme;
+        applyState();
+        refreshDrawer(state);
+      });
+    });
+    document.getElementById("mobile-gain").addEventListener("input", e => {
+      state.sensitivity = parseFloat(e.target.value);
+      applyState();
+    });
+    document.getElementById("mobile-fft-prev").addEventListener("click", () => {
+      const i = FFT_VALUES.indexOf(state.fftSize);
+      state.fftSize = FFT_VALUES[Math.max(0, i - 1)];
+      applyState();
+      refreshDrawer(state);
+    });
+    document.getElementById("mobile-fft-next").addEventListener("click", () => {
+      const i = FFT_VALUES.indexOf(state.fftSize);
+      state.fftSize = FFT_VALUES[Math.min(FFT_VALUES.length - 1, i + 1)];
+      applyState();
+      refreshDrawer(state);
+    });
+    document.getElementById("mobile-smooth").addEventListener("input", e => {
+      state.smoothing = parseFloat(e.target.value);
+      applyState();
+    });
+    const autoToggle = document.getElementById("mobile-autogain");
+    if (autoToggle) {
+      autoToggle.addEventListener("change", e => {
+        state.autoGain = !!e.target.checked;
+        applyState();
+        refreshDrawer(state);
+      });
+    }
+    const keepToggle = document.getElementById("mobile-keepawake");
+    if (keepToggle) {
+      keepToggle.addEventListener("change", e => {
+        state.keepScreenOn = !!e.target.checked;
+        if (typeof window.onKeepScreenOnChange === "function") {
+          window.onKeepScreenOnChange(state.keepScreenOn);
+        }
+      });
+    }
+    const micToggle = document.getElementById("mobile-micmode");
+    if (micToggle) {
+      micToggle.checked = !!state.micMode;
+      micToggle.addEventListener("change", e => {
+        state.micMode = !!e.target.checked;
+      });
+    }
+    const micAutoToggle = document.getElementById("mobile-micmode-auto");
+    if (micAutoToggle) {
+      micAutoToggle.checked = !!state.micModeAuto;
+      micAutoToggle.addEventListener("change", e => {
+        state.micModeAuto = !!e.target.checked;
+        try {
+          if (typeof localStorage !== "undefined") {
+            localStorage.setItem("scope.micModeAuto", state.micModeAuto ? "true" : "false");
+          }
+        } catch (_e) { /* private mode etc. */ }
+      });
+    }
+    for (const band of ["bass", "mid", "treb"]) {
+      const el = document.getElementById(`mobile-eq-${band}`);
+      if (el) {
+        el.addEventListener("input", e => {
+          state.bandGain[band] = parseFloat(e.target.value);
+          applyState();
+        });
+      }
+    }
+    document.getElementById("mobile-backdrop").addEventListener("click", closeDrawer);
+    const closeBtn = document.getElementById("mobile-drawer-close");
+    if (closeBtn) closeBtn.addEventListener("click", closeDrawer);
+    const exitBtn = document.getElementById("mobile-exit");
+    if (exitBtn) {
+      exitBtn.addEventListener("click", () => {
+        if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
+          window.Capacitor.Plugins.App.exitApp();
+        }
+      });
+    }
+  }
+
+  function wireGestures(canvas, state, applyState) {
+    // Canvas gestures:
+    //   - Double-tap: cycle view (replaced earlier swipe-right which fought
+    //     the Android system back gesture from the screen edge).
+    //   - Swipe-left: open the settings drawer. Edge deadzone in
+    //     classifySwipe rejects swipes starting near either screen edge so
+    //     the system back-gesture wins uncontested in that zone.
+    // Backdrop gestures (drawer open): tap closes the drawer; swipes are
+    // ignored because the backdrop tap handler is already wired.
+    let x0 = 0, y0 = 0;
+    let lastTapTime = 0;
+    let lastTapX = 0, lastTapY = 0;
+    const DOUBLE_TAP_MS = 300;
+    const DOUBLE_TAP_PX = 50;
+    const TAP_MAX_DISTANCE_PX = 10;
+
+    function onStart(e) {
+      const t = e.changedTouches[0];
+      x0 = t.clientX;
+      y0 = t.clientY;
+    }
+
+    function onEndCanvas(e) {
+      const t = e.changedTouches[0];
+      const dx = t.clientX - x0;
+      const dy = t.clientY - y0;
+      const dist = Math.hypot(dx, dy);
+
+      // Tap (negligible movement): double-tap cycles view.
+      if (dist < TAP_MAX_DISTANCE_PX) {
+        const now = Date.now();
+        if (now - lastTapTime < DOUBLE_TAP_MS &&
+            Math.abs(t.clientX - lastTapX) < DOUBLE_TAP_PX &&
+            Math.abs(t.clientY - lastTapY) < DOUBLE_TAP_PX) {
+          cycleView(+1, state, applyState);
+          lastTapTime = 0; // reset to require a fresh double for next cycle
+        } else {
+          lastTapTime = now;
+          lastTapX = t.clientX;
+          lastTapY = t.clientY;
+        }
+        return;
+      }
+
+      // Real swipe: only swipe-left to open drawer is recognised on canvas.
+      const dir = window.classifySwipe(x0, y0, dx, dy, {
+        x0,
+        canvasWidth: canvas.clientWidth,
+      });
+      if (dir === "left") openDrawer();
+    }
+
+    canvas.addEventListener("touchstart", onStart, { passive: true });
+    canvas.addEventListener("touchend", onEndCanvas, { passive: true });
+
+    // Backdrop (visible while drawer is open): swipe LTR closes the drawer,
+    // mirroring the swipe-RTL-opens gesture on the canvas. Same edge-deadzone
+    // discipline so the Android system back-gesture wins near screen edges.
+    const backdrop = document.getElementById("mobile-backdrop");
+    if (backdrop) {
+      function onEndBackdrop(e) {
+        const t = e.changedTouches[0];
+        const dx = t.clientX - x0;
+        const dy = t.clientY - y0;
+        const dir = window.classifySwipe(x0, y0, dx, dy, {
+          x0,
+          canvasWidth: window.innerWidth,
+        });
+        if (dir === "right") closeDrawer();
+      }
+      backdrop.addEventListener("touchstart", onStart, { passive: true });
+      backdrop.addEventListener("touchend", onEndBackdrop, { passive: true });
+    }
+  }
+
+  window.MobileUI = {
+    showToast,
+    openDrawer,
+    closeDrawer,
+    isDrawerOpen,
+    cycleView,
+    refreshDrawer,
+    wireDrawer,
+    wireGestures,
+  };
+})();
