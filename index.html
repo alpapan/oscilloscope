@@ -56,6 +56,15 @@
       <label>Smoothing
         <input id="smooth" type="range" min="0.65" max="0.95" step="0.01" value="0.8">
       </label>
+      <label>EQ Bass
+        <input id="eq-bass" type="range" min="0" max="2" step="0.05" value="1">
+      </label>
+      <label>EQ Mid
+        <input id="eq-mid" type="range" min="0" max="2" step="0.05" value="1">
+      </label>
+      <label>EQ Treble
+        <input id="eq-treb" type="range" min="0" max="2" step="0.05" value="1">
+      </label>
     </details>
   </div>
   <div id="start-screen">
@@ -111,6 +120,12 @@
     <section>
       <h2>Smoothing</h2>
       <input id="mobile-smooth" type="range" min="0.65" max="0.95" step="0.01" value="0.8">
+    </section>
+    <section>
+      <h2>EQ for visualisation</h2>
+      <label>Bass <input id="mobile-eq-bass" type="range" min="0" max="2" step="0.05" value="1"></label>
+      <label>Mid <input id="mobile-eq-mid" type="range" min="0" max="2" step="0.05" value="1"></label>
+      <label>Treble <input id="mobile-eq-treb" type="range" min="0" max="2" step="0.05" value="1"></label>
     </section>
     <button id="mobile-stop" type="button" class="stop">Stop capture</button>
     <button id="mobile-exit" type="button" class="stop">Exit app</button>
