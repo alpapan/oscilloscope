@@ -47,7 +47,11 @@ class AudioCaptureService : Service() {
 
     @Volatile private var running = false
     private var projection: MediaProjection? = null
-    private var record: AudioRecord? = null
+    // Volatile because startReader's reader thread reassigns this field on
+    // its own thread when retrying the policy-manager patch (Bug C fix),
+    // and the field is also read from other entry points (onDestroy). Without
+    // volatile the JMM does not guarantee visibility of the reassignment.
+    @Volatile private var record: AudioRecord? = null
     private var thread: Thread? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -113,11 +117,7 @@ class AudioCaptureService : Service() {
         // 2 channels x 4 bytes/float = 8 bytes/frame
         val bytesPerFrame = 8
         val bufferBytes = maxOf(minBytes, FRAMES_PER_CHUNK * bytesPerFrame)
-        record = AudioRecord.Builder()
-            .setAudioFormat(format)
-            .setBufferSizeInBytes(bufferBytes)
-            .setAudioPlaybackCaptureConfig(config)
-            .build()
+        record = buildProjectionRecord(config, format, bufferBytes)
         record?.startRecording()
         running = true
 
@@ -136,6 +136,13 @@ class AudioCaptureService : Service() {
             var chunkIdx = 0
             var lastNonZeroIdx = 0
             var lastFiredIdx = Int.MIN_VALUE / 2
+            // Internal AudioRecord-recreate mimicking the user's manual
+            // "stop & restart" workaround: when capture starts AFTER an
+            // unflagged source is already playing, AudioPolicyManager does not
+            // always patch the existing track into our mix. Rebuilding the
+            // AudioRecord with the same projection token forces a re-evaluation
+            // and the existing track gets routed. One attempt only per session.
+            var refreshAttempted = false
             val SILENCE_THRESHOLD_CHUNKS = 50           // ~1.0 s at 1024/48k
             val RATE_LIMIT_CHUNKS = 500                 // ~10 s
             while (running && myToken == latestToken) {
@@ -153,12 +160,23 @@ class AudioCaptureService : Service() {
                 } else {
                     val silentRun = chunkIdx - lastNonZeroIdx
                     if (silentRun >= SILENCE_THRESHOLD_CHUNKS &&
-                        silentRun % SILENCE_THRESHOLD_CHUNKS == 0 &&
-                        (chunkIdx - lastFiredIdx) > RATE_LIMIT_CHUNKS &&
-                        hasSilentRestrictedPlayback(audioMgr)) {
-                        lastFiredIdx = chunkIdx
-                        if (myToken == latestToken) {
-                            pluginRef?.notifySilentCapture()
+                        silentRun % SILENCE_THRESHOLD_CHUNKS == 0) {
+                        when {
+                            hasSilentRestrictedPlayback(audioMgr) -> {
+                                if ((chunkIdx - lastFiredIdx) > RATE_LIMIT_CHUNKS &&
+                                    myToken == latestToken) {
+                                    lastFiredIdx = chunkIdx
+                                    pluginRef?.notifySilentCapture()
+                                }
+                            }
+                            !refreshAttempted && hasUnflaggedPlayback(audioMgr) -> {
+                                refreshAttempted = true
+                                try { record?.stop() } catch (_: Throwable) {}
+                                try { record?.release() } catch (_: Throwable) {}
+                                record = buildProjectionRecord(config, format, bufferBytes)
+                                record?.startRecording()
+                                lastNonZeroIdx = chunkIdx
+                            }
                         }
                     }
                 }
@@ -174,6 +192,16 @@ class AudioCaptureService : Service() {
             }
         }, "ScopeAudioReader").also { it.start() }
     }
+
+    private fun buildProjectionRecord(
+        config: AudioPlaybackCaptureConfiguration,
+        format: AudioFormat,
+        bufferBytes: Int
+    ): AudioRecord = AudioRecord.Builder()
+        .setAudioFormat(format)
+        .setBufferSizeInBytes(bufferBytes)
+        .setAudioPlaybackCaptureConfig(config)
+        .build()
 
     /** True iff there is at least one active playback configuration with a
      *  matching usage that ALSO has the FLAG_NO_MEDIA_PROJECTION flag set in
@@ -281,12 +309,14 @@ class AudioCaptureService : Service() {
             // Emit STEREO bytes (duplicate mono into L+R) so the JS path
             // (which expects interleaved stereo) stays unchanged.
             val byteBuf = ByteBuffer.allocate(FRAMES_PER_CHUNK * 2 * 4).order(ByteOrder.LITTLE_ENDIAN)
-            // Poll for an unflagged source every ~2 minutes. 48000 / 1024 ≈
-            // 47 chunks per second, so ~5500 chunks per 2 minutes. Rate-limit
-            // re-firings to one per ~10 min so a single steady-unflagged
+            // Poll for an unflagged source every ~5 s (≈ 235 chunks at 1024 /
+            // 48 kHz). The previous 2-minute interval was too long: users
+            // who switch to unrestricted content (VLC, a YouTube tab) expect
+            // the switch-back prompt within seconds, not minutes. Rate-limit
+            // re-firings to one per ~5 min so a single steady-unflagged
             // session (user playing VLC) does not spam the banner.
-            val POLL_INTERVAL_CHUNKS = 5500
-            val RATE_LIMIT_CHUNKS = 27500
+            val POLL_INTERVAL_CHUNKS = 235
+            val RATE_LIMIT_CHUNKS = 14100
             var chunkCount = 0
             var lastFiredCount = Int.MIN_VALUE / 2
             while (running && myToken == latestToken) {
