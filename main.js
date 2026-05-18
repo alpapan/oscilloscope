@@ -502,9 +502,11 @@ function frame() {
     }
   }
 
-  // Auto-gain: lerp the gain node toward TARGET_LEVEL / longAverage, clamped.
-  if (state.autoGain && audio.gain && state.audio.longAverage > 0) {
-    const longAvg = Math.max(MIN_LONG, state.audio.longAverage);
+  // Auto-gain: normalise time-domain RMS (matches the units the gain node
+  // operates on) toward TARGET_LEVEL. Using bass-band FFT sum here was a
+  // unit mismatch that drove gain to the floor on first frame.
+  if (state.autoGain && audio.gain && state.audio.rmsLongAverage > 0) {
+    const longAvg = Math.max(MIN_LONG, state.audio.rmsLongAverage);
     let targetGain = TARGET_LEVEL / longAvg;
     if (targetGain < GAIN_MIN) targetGain = GAIN_MIN;
     else if (targetGain > GAIN_MAX) targetGain = GAIN_MAX;

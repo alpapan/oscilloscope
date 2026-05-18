@@ -64,7 +64,8 @@ npm run sync                            # runs sync-www.sh then `cap sync androi
 
 # Build release APK
 cd android && ./gradlew :app:assembleRelease
-# -> android/app/build/outputs/apk/release/app-release.apk
+# -> android/app/build/outputs/apk/release/scope-<versionName>.apk
+# versionName is set in android/app/build.gradle (defaultConfig.versionName).
 ```
 
 Single-step build from source: `npm run build:android` runs sync-www.sh, `cap sync`, then assembleRelease.

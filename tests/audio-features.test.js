@@ -8,10 +8,15 @@ const {
   createAudioAnalysis,
 } = require("../audio-features.js");
 
-function fakeAnalyser(byteFreqData) {
+function fakeAnalyser(byteFreqData, floatTimeData) {
   return {
+    fftSize: floatTimeData ? floatTimeData.length : byteFreqData.length * 2,
     frequencyBinCount: byteFreqData.length,
     getByteFrequencyData(out) { out.set(byteFreqData); },
+    getFloatTimeDomainData(out) {
+      if (floatTimeData) out.set(floatTimeData);
+      else out.fill(0);
+    },
   };
 }
 
@@ -158,4 +163,52 @@ test("createAudioAnalysis: null analyser returns zero state without crashing", (
   assert.equal(s.bass, 0);
   assert.equal(s.beat, false);
   assert.equal(s.beatPulse, 0);
+  assert.equal(s.rms, 0);
+  assert.equal(s.rmsLongAverage, 0);
+});
+
+test("createAudioAnalysis: tracks time-domain RMS for auto-gain", () => {
+  // RMS of a constant amplitude is just |amp|. Feed a synthetic time-domain
+  // signal of constant 0.5 and verify rms ≈ 0.5 and rmsLongAverage converges
+  // toward 0.5 over enough frames.
+  const fftSize = 2048;
+  const td = new Float32Array(fftSize).fill(0.5);
+  const bins = new Uint8Array(1024);             // freq side: zeros, doesn't matter
+  const analyser = fakeAnalyser(bins, td);
+  const af = createAudioAnalysis({
+    analyserL: analyser, analyserR: analyser, sampleRate: 48000, fftSize,
+  });
+
+  const first = af.update(1 / 60, 0);
+  assert.ok(Math.abs(first.rms - 0.5) < 1e-6, `rms=${first.rms}`);
+  assert.ok(Math.abs(first.rmsLongAverage - 0.5) < 1e-6, `seed rmsLong=${first.rmsLongAverage}`);
+
+  // After many frames at constant 0.5, rmsLongAverage stays near 0.5.
+  let last = first;
+  for (let i = 1; i < 300; i++) last = af.update(1 / 60, i * 16.7);
+  assert.ok(Math.abs(last.rmsLongAverage - 0.5) < 0.05, `late rmsLong=${last.rmsLongAverage}`);
+});
+
+test("createAudioAnalysis: rms responds to amplitude changes faster than rmsLongAverage", () => {
+  // Quiet baseline, then loud step. Short-term RMS must reflect the new
+  // amplitude immediately; long-term tracker should still be biased toward
+  // the old level so auto-gain has a stable target.
+  const fftSize = 2048;
+  const quiet = new Float32Array(fftSize).fill(0.05);
+  const loud  = new Float32Array(fftSize).fill(0.5);
+  const bins = new Uint8Array(1024);
+  let timeData = quiet;
+  const analyser = {
+    fftSize, frequencyBinCount: 1024,
+    getByteFrequencyData(out) { out.set(bins); },
+    getFloatTimeDomainData(out) { out.set(timeData); },
+  };
+  const af = createAudioAnalysis({
+    analyserL: analyser, analyserR: analyser, sampleRate: 48000, fftSize,
+  });
+  for (let i = 0; i < 60; i++) af.update(1 / 60, i * 16.7);
+  timeData = loud;
+  const after = af.update(1 / 60, 60 * 16.7);
+  assert.ok(after.rms > 0.4, `rms should jump quickly: ${after.rms}`);
+  assert.ok(after.rmsLongAverage < 0.2, `rmsLong should still be biased toward quiet baseline: ${after.rmsLongAverage}`);
 });
