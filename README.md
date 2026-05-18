@@ -1,13 +1,25 @@
 # Scope
 
-A music oscilloscope. Captures audio from a Chromium browser tab and
-renders three live views: time-domain waveform, frequency spectrum, and
-stereo Lissajous.
+A music oscilloscope. Captures audio (browser tab on desktop, system mix or
+microphone on Android) and renders three live views: time-domain waveform,
+frequency spectrum, and stereo Lissajous.
 
-## Run it
+## Layout
+
+- **Desktop build**: the static web files at the project root — `index.html`,
+  `main.js`, `style.css`, `audio-*.js`, `mesh-warp.js`, `palette-color.js`,
+  `swipe-detector.js`, `mobile-ui.js`, `pixi-shim.js`. **There is no compile
+  step**; serve them over HTTP and open in a Chromium browser.
+- **Android build**: the Android Studio project under `android/`. Capacitor
+  copies the same root files into `android/app/src/main/assets/public/` via
+  `sync-www.sh` and the APK runs them in a WebView. APKs land in
+  `android/app/build/outputs/apk/release/`.
+
+## Run it on desktop
 
 1. Clone the repo.
-2. From the project root: `python3 -m http.server 8000`
+2. From the project root: `npm install && npm run serve`
+   (or `python3 -m http.server 8000` if you prefer no Node).
 3. Open `http://localhost:8000` in Chrome, Edge, or Brave.
 4. Open Spotify Web Player or YouTube in another tab and play something.
 5. In Scope, click **Start capture** then share that tab and tick **Share tab audio**.
@@ -44,6 +56,38 @@ Scope also runs as an Android APK with system audio loopback (Android 14+).
    running over your music app.
 7. Tap the cycle-view button on the PiP window to advance views without
    expanding back.
+
+### Capture mode badge
+
+While capture is running, a small pill in the top-right shows the active
+source: **SYSTEM** (green) for the MediaProjection / system-audio path,
+**MIC** (amber) for the microphone fallback.
+
+### Mic fallback for DRM-protected sources
+
+Some apps (notably Spotify music and some Chrome playback paths) set
+`FLAG_NO_MEDIA_PROJECTION` on their AudioTrack, which causes Android's
+audio policy to strip those streams from `REMOTE_SUBMIX` and `Scope` reads
+literal-zero PCM. There is no client-side bypass for that flag.
+
+To recover the visualisation in that case, Scope offers a microphone-source
+capture path (the phone's mic picks up speaker output). When projection-mode
+capture stays silent while another app is actively playing, a banner offers
+"Use microphone"; tap once and Scope requests `RECORD_AUDIO` permission and
+restarts capture via the mic.
+
+- Settings → **Microphone capture** toggle to pick mic mode upfront.
+- Settings → **Auto-switch to microphone when source is protected** to skip
+  the banner and switch silently (a 2 s toast confirms the switch). This
+  preference is persisted across sessions.
+- While in mic mode, Scope polls every ~5 s for an unflagged source; if one
+  appears (you switch to VLC, YouTube, etc.) it offers to switch back to the
+  higher-quality system path. Rate-limited to one offer per ~5 min.
+
+Mic mode also enables Android's `AutomaticGainControl` and `NoiseSuppressor`
+audio effects, and the JS auto-gain envelope follower opens its ceiling
+from `2×` (system mode) to `12×` so volume variation between songs is
+normalised.
 
 ### Build from source
 ```bash
