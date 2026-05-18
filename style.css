@@ -100,3 +100,185 @@ html, body {
 #controls:hover {
   opacity: 1;
 }
+
+/* =========================================================================
+   Mobile UI (body.mobile)
+   ========================================================================= */
+
+/* Hide desktop start-screen and controls on Android.
+   Both selectors cover the case where JS later sets the [hidden] attribute too;
+   the attribute-selector form is included for defensiveness even though
+   `body.mobile #start-screen` (0,1,1,1) already outranks `#start-screen[hidden]`
+   (0,1,1,0) in CSS specificity. */
+body.mobile #controls,
+body.mobile #start-screen,
+body.mobile #controls[hidden],
+body.mobile #start-screen[hidden] { display: none; }
+
+#mobile-start {
+  position: fixed;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--fg);
+  text-align: center;
+  font-family: system-ui, -apple-system, sans-serif;
+  z-index: 10;
+}
+body.mobile #mobile-start { display: flex; }
+body.mobile #mobile-start[hidden] { display: none; }
+
+#mobile-start h1 {
+  margin: 0;
+  font-size: 48px;
+  letter-spacing: 4px;
+}
+#mobile-capture {
+  padding: 16px 32px;
+  font-size: 20px;
+  background: var(--fg);
+  color: var(--bg);
+  border: none;
+  border-radius: 8px;
+  min-height: 56px;
+  min-width: 220px;
+  cursor: pointer;
+}
+#mobile-capture:active { opacity: 0.7; }
+
+#mobile-toast {
+  position: fixed;
+  top: env(safe-area-inset-top, 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--fg);
+  border: 1px solid var(--fg);
+  border-radius: 16px;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  letter-spacing: 1px;
+  pointer-events: none;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+#mobile-toast.visible { opacity: 1; }
+
+#mobile-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 30;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+body.drawer-open #mobile-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#mobile-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(80vw, 360px);
+  padding: env(safe-area-inset-top, 16px) 20px 20px;
+  background: var(--bg);
+  color: var(--fg);
+  border-left: 1px solid var(--fg);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow-y: auto;
+  transform: translateX(100%);
+  transition: transform 220ms ease;
+  z-index: 40;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+body.drawer-open #mobile-drawer { transform: translateX(0); }
+
+#mobile-drawer section { display: flex; flex-direction: column; gap: 8px; }
+#mobile-drawer h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  opacity: 0.7;
+}
+
+.chips { display: flex; gap: 8px; }
+.chip {
+  flex: 1;
+  padding: 12px 0;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--fg);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  min-height: 44px;
+}
+.chip.active {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--fg);
+  border-radius: 6px;
+  padding: 4px;
+}
+.stepper button {
+  background: transparent;
+  color: var(--fg);
+  border: none;
+  font-size: 18px;
+  padding: 8px 16px;
+  cursor: pointer;
+  min-width: 44px;
+  min-height: 44px;
+}
+.stepper span {
+  flex: 1;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+#mobile-drawer input[type="range"] {
+  width: 100%;
+  height: 32px;
+}
+
+#mobile-stop {
+  margin-top: auto;
+  padding: 16px;
+  background: var(--fg);
+  color: var(--bg);
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  min-height: 56px;
+}
+
+/* In PiP mode hide all overlays; canvas only. */
+body.pip #mobile-start,
+body.pip #mobile-drawer,
+body.pip #mobile-backdrop,
+body.pip #mobile-toast { display: none !important; }

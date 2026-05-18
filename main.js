@@ -19,6 +19,37 @@ function findZeroCrossing(buf) {
 }
 
 // =============================================================================
+// Platform detection (Android via Capacitor vs desktop browser)
+// =============================================================================
+
+function detectPlatform() {
+  if (typeof window === "undefined") return "node";
+  if (typeof window.Capacitor !== "undefined"
+      && window.Capacitor.getPlatform
+      && window.Capacitor.getPlatform() === "android") {
+    return "android";
+  }
+  return "desktop";
+}
+
+const PLATFORM = (typeof window !== "undefined") ? detectPlatform() : "node";
+
+if (typeof document !== "undefined") {
+  // Mark the body so CSS can swap UI variants. The class must be applied
+  // before any paint that depends on it. In a Capacitor WebView main.js is
+  // typically injected after DOMContentLoaded already fired, so the
+  // synchronous branch is the common case; the listener branch is the
+  // genuine edge case (script loaded eagerly in <head>).
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      document.body.classList.toggle("mobile", PLATFORM === "android");
+    }, { once: true });
+  } else {
+    document.body.classList.toggle("mobile", PLATFORM === "android");
+  }
+}
+
+// =============================================================================
 // Browser-only state, audio, render, views, controls
 // =============================================================================
 
@@ -48,6 +79,10 @@ const audio = {
   splitter: null,
   analyserL: null,
   analyserR: null,
+  // Android-only:
+  workletNode: null,
+  silence: null,
+  audioChunkHandle: null,
 };
 
 const pixi = {
@@ -69,6 +104,9 @@ const themes = {
 
 async function startCapture() {
   if (state.running) return;
+  if (PLATFORM === "android") {
+    return startCaptureAndroid();
+  }
   if (!navigator.mediaDevices?.getDisplayMedia) {
     setStatus("This visualiser needs Chrome, Edge, or Brave. Firefox cannot capture tab audio.");
     return;
@@ -143,6 +181,10 @@ async function startCapture() {
 }
 
 function stopCapture() {
+  if (PLATFORM === "android") {
+    stopCaptureAndroid();
+    return;
+  }
   // Idempotent: safe to call when already stopped.
   if (!state.running && !audio.stream && !audio.ctx) return;
 
@@ -163,6 +205,118 @@ function stopCapture() {
   // stored rAF handle.
   document.getElementById("start-screen").hidden = false;
   document.getElementById("controls").hidden = true;
+}
+
+async function startCaptureAndroid() {
+  // Lazy-lookup the registered plugin. Capacitor exposes registered native
+  // plugins as window.Capacitor.Plugins.<Name>.
+  const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
+  if (!plugin) {
+    setStatus("Audio plugin not available. Reinstall the APK.");
+    return;
+  }
+
+  try {
+    await plugin.startCapture();
+  } catch (err) {
+    setStatus(`Capture denied: ${err.message || "permission rejected"}`);
+    return;
+  }
+
+  audio.ctx = new AudioContext({ sampleRate: 48000 });
+  if (audio.ctx.state === "suspended") {
+    await audio.ctx.resume();
+  }
+  await audio.ctx.audioWorklet.addModule("audio-worklet-processor.js");
+  // Guard against rare mono-only output devices: fall back to single channel
+  // if the destination cannot do stereo. The worklet's process() writes only
+  // outputs[0], so the right channel is just silently dropped in mono mode;
+  // the Lissajous view falls back to a vertical line (the rotated convention
+  // already handles mono correctly).
+  const outChannels = (audio.ctx.destination.maxChannelCount >= 2) ? 2 : 1;
+  state.channels = outChannels;
+  audio.workletNode = new AudioWorkletNode(audio.ctx, "scope-processor", {
+    numberOfInputs: 0,
+    numberOfOutputs: 1,
+    outputChannelCount: [outChannels],
+  });
+  audio.gain = audio.ctx.createGain();
+  audio.gain.gain.value = state.sensitivity;
+  audio.splitter = audio.ctx.createChannelSplitter(2);
+  audio.analyserL = audio.ctx.createAnalyser();
+  audio.analyserR = audio.ctx.createAnalyser();
+  audio.analyserL.fftSize = state.fftSize;
+  audio.analyserR.fftSize = state.fftSize;
+  audio.analyserL.smoothingTimeConstant = state.smoothing;
+  audio.analyserR.smoothingTimeConstant = state.smoothing;
+
+  // Zero-gain sink - drives the rendering thread without audible output.
+  audio.silence = audio.ctx.createGain();
+  audio.silence.gain.value = 0;
+
+  audio.workletNode.connect(audio.gain);
+  audio.gain.connect(audio.splitter);
+  audio.splitter.connect(audio.analyserL, 0);
+  audio.splitter.connect(audio.analyserR, 1);
+  audio.analyserL.connect(audio.silence);
+  audio.analyserR.connect(audio.silence);
+  audio.silence.connect(audio.ctx.destination);
+
+  // Subscribe to PCM events. Removed in stopCaptureAndroid.
+  // Capacitor contract: addListener returns Promise<PluginListenerHandle>
+  // where the handle has remove(): Promise<void>. Both calls awaited.
+  audio.audioChunkHandle = await plugin.addListener("audioChunk", onAudioChunkAndroid);
+
+  state.running = true;
+  setStatus("");
+  document.getElementById("mobile-start").hidden = true;
+  applyState();
+  requestAnimationFrame(frame);
+}
+
+function onAudioChunkAndroid(event) {
+  if (!audio.workletNode || !event || !event.data) return;
+  // event.data is a Base64-encoded interleaved Float32Array of stereo PCM,
+  // 1024 stereo frames per chunk = 2048 floats = 8192 bytes binary = 10936 chars Base64.
+  // Wrap in try/catch: a malformed chunk must not crash the visualisation.
+  try {
+    const bin = atob(event.data);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    // The Uint8Array is byte-aligned; reinterpret as Float32.
+    const interleaved = new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+    // Deinterleave into per-channel arrays (worklet's port expects {left, right}).
+    const frames = interleaved.length / 2;
+    const left = new Float32Array(frames);
+    const right = new Float32Array(frames);
+    for (let i = 0, j = 0; i < frames; i++, j += 2) {
+      left[i] = interleaved[j];
+      right[i] = interleaved[j + 1];
+    }
+    audio.workletNode.port.postMessage({ left, right }, [left.buffer, right.buffer]);
+  } catch (_err) {
+    // Silent drop: a bad chunk is rare and recoverable; logging would spam.
+  }
+}
+
+async function stopCaptureAndroid() {
+  if (audio.audioChunkHandle && audio.audioChunkHandle.remove) {
+    await audio.audioChunkHandle.remove();
+    audio.audioChunkHandle = null;
+  }
+  const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
+  if (plugin) {
+    try { await plugin.stopCapture(); } catch (_e) {}
+  }
+  if (audio.ctx) {
+    try { await audio.ctx.close(); } catch (_e) {}
+    audio.ctx = null;
+  }
+  audio.workletNode = audio.gain = audio.splitter = audio.analyserL = audio.analyserR = audio.silence = null;
+  state.running = false;
+  if (typeof document !== "undefined") {
+    document.getElementById("mobile-start").hidden = false;
+  }
 }
 
 function applyState() {
@@ -199,6 +353,10 @@ function applyState() {
       lissOpt.disabled = state.channels === 1;
       lissOpt.title = state.channels === 1 ? "Source is mono - no stereo to plot." : "";
     }
+  }
+
+  if (PLATFORM === "android" && window.MobileUI) {
+    window.MobileUI.refreshDrawer(state);
   }
 }
 
@@ -335,7 +493,7 @@ function drawLissajous(g, analyserL, analyserR, theme, w, h) {
 
 async function init() {
   try {
-    if (!navigator.mediaDevices?.getDisplayMedia) {
+    if (PLATFORM === "desktop" && !navigator.mediaDevices?.getDisplayMedia) {
       setStatus("This visualiser needs Chrome, Edge, or Brave. Firefox cannot capture tab audio.");
       const captureBtn = document.getElementById("capture");
       if (captureBtn) captureBtn.disabled = true;
@@ -406,6 +564,34 @@ async function init() {
       pixi.trailSprite.texture = pixi.trail;
     };
     window.addEventListener("resize", resize);
+
+    if (PLATFORM === "android") {
+      document.body.classList.add("mobile");
+      document.getElementById("mobile-start").hidden = false;
+      document.getElementById("mobile-capture").onclick = startCapture;
+      document.getElementById("mobile-stop").onclick = stopCapture;
+      MobileUI.wireDrawer(state, applyState);
+      MobileUI.wireGestures(document.getElementById("stage"), state, applyState);
+      // The PiP RemoteAction calls window.cycleView(1) via the Capacitor bridge.
+      window.cycleView = function (direction) {
+        MobileUI.cycleView(direction, state, applyState);
+      };
+      // Capacitor App backButton: drawer-close > stop-capture > exit.
+      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
+        window.Capacitor.Plugins.App.addListener("backButton", () => {
+          if (MobileUI.isDrawerOpen()) {
+            MobileUI.closeDrawer();
+            return;
+          }
+          if (state.running) {
+            stopCapture();
+            return;
+          }
+          window.Capacitor.Plugins.App.exitApp();
+        });
+      }
+      return;
+    }
 
     document.getElementById("capture").addEventListener("click", startCapture);
     document.getElementById("stop").addEventListener("click", stopCapture);
