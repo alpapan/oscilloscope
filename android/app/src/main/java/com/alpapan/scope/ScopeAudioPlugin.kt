@@ -1,21 +1,32 @@
 package com.alpapan.scope
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionConfig
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.view.WindowManager
 import androidx.activity.result.ActivityResult
+import androidx.core.content.ContextCompat
 import com.getcapacitor.JSObject
+import com.getcapacitor.PermissionState
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
+import com.getcapacitor.annotation.Permission
+import com.getcapacitor.annotation.PermissionCallback
 
-@CapacitorPlugin(name = "ScopeAudio")
+@CapacitorPlugin(
+    name = "ScopeAudio",
+    permissions = [
+        Permission(strings = [Manifest.permission.RECORD_AUDIO], alias = "mic")
+    ]
+)
 class ScopeAudioPlugin : Plugin() {
 
     @Volatile var isCapturing: Boolean = false
@@ -78,6 +89,46 @@ class ScopeAudioPlugin : Plugin() {
         call.resolve()
     }
 
+    /** Mic-source capture path. Bypasses AudioPlaybackCapture so it works
+     *  for any source on the phone, including ones that opt out with
+     *  FLAG_NO_MEDIA_PROJECTION (Spotify music, some Chrome paths). Quality
+     *  is reduced (speaker -> mic acoustic loop) but it visualises. */
+    @PluginMethod
+    fun startMicCapture(call: PluginCall) {
+        if (isCapturing) {
+            call.resolve()
+            return
+        }
+        if (getPermissionState("mic") != PermissionState.GRANTED) {
+            requestPermissionForAlias("mic", call, "micPermissionCallback")
+            return
+        }
+        launchMicService()
+        call.resolve()
+    }
+
+    @PermissionCallback
+    private fun micPermissionCallback(call: PluginCall) {
+        if (getPermissionState("mic") == PermissionState.GRANTED) {
+            launchMicService()
+            call.resolve()
+        } else {
+            call.reject("Mic permission denied")
+        }
+    }
+
+    private fun launchMicService() {
+        val intent = Intent(context, AudioCaptureService::class.java).apply {
+            putExtra(AudioCaptureService.EXTRA_MIC_MODE, true)
+        }
+        context.startForegroundService(intent)
+        AudioCaptureService.pluginRef = this
+        isCapturing = true
+        (bridge?.activity as? MainActivity)?.let { act ->
+            act.runOnUiThread { act.setPipAutoEnter(true) }
+        }
+    }
+
     @PluginMethod
     fun stopCapture(call: PluginCall) {
         val intent = Intent(context, AudioCaptureService::class.java)
@@ -101,6 +152,27 @@ class ScopeAudioPlugin : Plugin() {
     fun emitPcmChunk(base64: String) {
         val data = JSObject().apply { put("data", base64) }
         notifyListeners("audioChunk", data)
+    }
+
+    /** Diagnostic stream surfaced to JS; the JS overlay renders it in-app
+     *  because the device has no adb tether on this build host. */
+    fun emitDebug(msg: String) {
+        val data = JSObject().apply { put("data", msg) }
+        notifyListeners("audioDebug", data)
+    }
+
+    /** Called by AudioCaptureService when projection-mode capture is stuck at
+     *  zero PCM while another app is actively playing matching usage. JS
+     *  should respond by offering the user a switch to mic mode. */
+    fun notifySilentCapture() {
+        notifyListeners("silentCapture", JSObject())
+    }
+
+    /** Called by AudioCaptureService periodically in mic mode when an unflagged
+     *  source becomes available; JS can offer the user to switch back to the
+     *  higher-quality projection path. */
+    fun notifyUnrestrictedAvailable() {
+        notifyListeners("unrestrictedAvailable", JSObject())
     }
 
     /** Toggle FLAG_KEEP_SCREEN_ON on the activity window. Must run on the UI

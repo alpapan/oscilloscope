@@ -108,6 +108,13 @@
         }
       });
     }
+    const micToggle = document.getElementById("mobile-micmode");
+    if (micToggle) {
+      micToggle.checked = !!state.micMode;
+      micToggle.addEventListener("change", e => {
+        state.micMode = !!e.target.checked;
+      });
+    }
     for (const band of ["bass", "mid", "treb"]) {
       const el = document.getElementById(`mobile-eq-${band}`);
       if (el) {
