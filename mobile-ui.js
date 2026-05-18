@@ -57,6 +57,10 @@
     if (auto) auto.checked = !!state.autoGain;
     const keep = document.getElementById("mobile-keepawake");
     if (keep) keep.checked = !!state.keepScreenOn;
+    for (const band of ["bass", "mid", "treb"]) {
+      const el = document.getElementById(`mobile-eq-${band}`);
+      if (el) el.value = String(state.bandGain[band]);
+    }
   }
 
   function wireDrawer(state, applyState) {
@@ -103,6 +107,15 @@
           window.onKeepScreenOnChange(state.keepScreenOn);
         }
       });
+    }
+    for (const band of ["bass", "mid", "treb"]) {
+      const el = document.getElementById(`mobile-eq-${band}`);
+      if (el) {
+        el.addEventListener("input", e => {
+          state.bandGain[band] = parseFloat(e.target.value);
+          applyState();
+        });
+      }
     }
     document.getElementById("mobile-backdrop").addEventListener("click", closeDrawer);
     const closeBtn = document.getElementById("mobile-drawer-close");

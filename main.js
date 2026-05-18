@@ -74,6 +74,11 @@ const state = {
   smoothing: 0.8,
   running: false,
   channels: 2,            // detected at capture start
+  // Per-band visual EQ mix (linear gain). Affects the time-domain signal
+  // feeding the Waveform and Lissajous analysers only; the Spectrum view
+  // reads the original (un-EQd) signal so the user can see what they are
+  // dialling. 1.0 = unity, 0.0 = mute that band.
+  bandGain: { bass: 1.0, mid: 1.0, treb: 1.0 },
   autoGain: true,         // ON: envelope follower normalises; slider disabled
   keepScreenOn: true,     // ON: request Wake Lock + Android FLAG_KEEP_SCREEN_ON
   audioAnalysis: null,    // createAudioAnalysis instance, set after analysers up
@@ -96,6 +101,19 @@ const audio = {
   splitter: null,
   analyserL: null,
   analyserR: null,
+  // 3-band EQ chain: parallel filters → per-band gain → summed mix → second
+  // analyser pair. Spectrum view reads analyserL/R (original); Waveform and
+  // Lissajous read eqAnalyserL/R (EQd). See setupEqChain.
+  bassFilter: null,
+  midFilter: null,
+  trebFilter: null,
+  bassMix: null,
+  midMix: null,
+  trebMix: null,
+  eqSum: null,
+  eqSplitter: null,
+  eqAnalyserL: null,
+  eqAnalyserR: null,
   // Android-only:
   workletNode: null,
   silence: null,
@@ -185,6 +203,7 @@ async function startCapture() {
     audio.gain.connect(audio.splitter);
     audio.splitter.connect(audio.analyserL, 0);
     audio.splitter.connect(audio.analyserR, 1);
+    setupEqChain();
     // Deliberately do NOT connect to ctx.destination: the user already hears
     // the source tab; routing through here would cause feedback.
 
@@ -209,6 +228,54 @@ async function startCapture() {
     setStatus(`Capture failed: ${err.message}`);
     stream.getTracks().forEach(t => t.stop());
   }
+}
+
+// Build the parallel 3-band EQ chain that feeds Waveform + Lissajous.
+// Lowpass / bandpass / highpass filters each fed by `audio.gain`, each
+// multiplied by a per-band GainNode (state.bandGain), summed into eqSum,
+// then split into per-channel analysers used by drawWaveform/drawLissajous.
+function setupEqChain() {
+  const ctx = audio.ctx;
+  audio.bassFilter = ctx.createBiquadFilter();
+  audio.bassFilter.type = "lowpass";
+  audio.bassFilter.frequency.value = 250;
+  audio.midFilter = ctx.createBiquadFilter();
+  audio.midFilter.type = "bandpass";
+  audio.midFilter.frequency.value = 1000;  // log-centre of [250, 4000]
+  audio.midFilter.Q.value = 0.5;           // wide so 250-4000 Hz passes
+  audio.trebFilter = ctx.createBiquadFilter();
+  audio.trebFilter.type = "highpass";
+  audio.trebFilter.frequency.value = 4000;
+
+  audio.bassMix = ctx.createGain();
+  audio.midMix  = ctx.createGain();
+  audio.trebMix = ctx.createGain();
+  audio.bassMix.gain.value = state.bandGain.bass;
+  audio.midMix.gain.value  = state.bandGain.mid;
+  audio.trebMix.gain.value = state.bandGain.treb;
+
+  audio.eqSum = ctx.createGain();
+  audio.eqSplitter = ctx.createChannelSplitter(2);
+  audio.eqAnalyserL = ctx.createAnalyser();
+  audio.eqAnalyserR = ctx.createAnalyser();
+  audio.eqAnalyserL.fftSize = state.fftSize;
+  audio.eqAnalyserR.fftSize = state.fftSize;
+  audio.eqAnalyserL.smoothingTimeConstant = state.smoothing;
+  audio.eqAnalyserR.smoothingTimeConstant = state.smoothing;
+
+  audio.gain.connect(audio.bassFilter);
+  audio.bassFilter.connect(audio.bassMix);
+  audio.bassMix.connect(audio.eqSum);
+  audio.gain.connect(audio.midFilter);
+  audio.midFilter.connect(audio.midMix);
+  audio.midMix.connect(audio.eqSum);
+  audio.gain.connect(audio.trebFilter);
+  audio.trebFilter.connect(audio.trebMix);
+  audio.trebMix.connect(audio.eqSum);
+
+  audio.eqSum.connect(audio.eqSplitter);
+  audio.eqSplitter.connect(audio.eqAnalyserL, 0);
+  audio.eqSplitter.connect(audio.eqAnalyserR, 1);
 }
 
 async function requestScreenLock() {
@@ -256,6 +323,9 @@ function stopCapture() {
     audio.ctx = null;
   }
   audio.source = audio.gain = audio.splitter = audio.analyserL = audio.analyserR = null;
+  audio.bassFilter = audio.midFilter = audio.trebFilter = null;
+  audio.bassMix = audio.midMix = audio.trebMix = null;
+  audio.eqSum = audio.eqSplitter = audio.eqAnalyserL = audio.eqAnalyserR = null;
 
   state.running = false;
   // Note: we don't cancelAnimationFrame here. The in-flight rAF tick (if
@@ -331,8 +401,11 @@ async function startCaptureAndroid() {
     audio.gain.connect(audio.splitter);
     audio.splitter.connect(audio.analyserL, 0);
     audio.splitter.connect(audio.analyserR, 1);
+    setupEqChain();
     audio.analyserL.connect(audio.silence);
     audio.analyserR.connect(audio.silence);
+    audio.eqAnalyserL.connect(audio.silence);
+    audio.eqAnalyserR.connect(audio.silence);
     audio.silence.connect(audio.ctx.destination);
 
     // Subscribe to PCM events. Removed in stopCaptureAndroid.
@@ -405,6 +478,9 @@ async function stopCaptureAndroid() {
     audio.ctx = null;
   }
   audio.workletNode = audio.gain = audio.splitter = audio.analyserL = audio.analyserR = audio.silence = null;
+  audio.bassFilter = audio.midFilter = audio.trebFilter = null;
+  audio.bassMix = audio.midMix = audio.trebMix = null;
+  audio.eqSum = audio.eqSplitter = audio.eqAnalyserL = audio.eqAnalyserR = null;
   state.audioAnalysis = null;
   state.running = false;
   if (typeof document !== "undefined") {
@@ -424,6 +500,15 @@ function applyState() {
     audio.analyserL.smoothingTimeConstant = state.smoothing;
     audio.analyserR.smoothingTimeConstant = state.smoothing;
   }
+  if (audio.eqAnalyserL && audio.eqAnalyserR) {
+    audio.eqAnalyserL.fftSize = state.fftSize;
+    audio.eqAnalyserR.fftSize = state.fftSize;
+    audio.eqAnalyserL.smoothingTimeConstant = state.smoothing;
+    audio.eqAnalyserR.smoothingTimeConstant = state.smoothing;
+  }
+  if (audio.bassMix) audio.bassMix.gain.value = state.bandGain.bass;
+  if (audio.midMix)  audio.midMix.gain.value  = state.bandGain.mid;
+  if (audio.trebMix) audio.trebMix.gain.value = state.bandGain.treb;
   if (pixi.trailSprite) {
     pixi.trailSprite.filters = themes[state.theme].filters;
   }
@@ -447,6 +532,12 @@ function applyState() {
   if (autoEl) autoEl.checked = !!state.autoGain;
   const keepEl = document.getElementById("keepawake");
   if (keepEl) keepEl.checked = !!state.keepScreenOn;
+  const bassEl = document.getElementById("eq-bass");
+  if (bassEl) bassEl.value = String(state.bandGain.bass);
+  const midEl = document.getElementById("eq-mid");
+  if (midEl) midEl.value = String(state.bandGain.mid);
+  const trebEl = document.getElementById("eq-treb");
+  if (trebEl) trebEl.value = String(state.bandGain.treb);
 
   // Mono guard for the Lissajous tab.
   if (viewSel) {
@@ -534,9 +625,12 @@ function frame() {
   }
 
   pixi.current.clear();
-  if (state.view === "waveform")  drawWaveform(pixi.current, audio.analyserL, theme, w, h);
+  if (state.view === "waveform")  drawWaveform(pixi.current, audio.eqAnalyserL || audio.analyserL, theme, w, h);
   if (state.view === "spectrum")  drawSpectrum(pixi.current, audio.analyserL, theme, w, h);
-  if (state.view === "lissajous") drawLissajous(pixi.current, audio.analyserL, audio.analyserR, theme, w, h);
+  if (state.view === "lissajous") drawLissajous(pixi.current,
+    audio.eqAnalyserL || audio.analyserL,
+    audio.eqAnalyserR || audio.analyserR,
+    theme, w, h);
 
   // Step 3: bake current onto the trail texture.
   pixi.app.renderer.render(pixi.current, { renderTexture: pixi.trail, clear: false });
@@ -860,6 +954,15 @@ async function init() {
         state.autoGain = !!e.target.checked;
         applyState();
       });
+    }
+    for (const band of ["bass", "mid", "treb"]) {
+      const el = document.getElementById(`eq-${band}`);
+      if (el) {
+        el.addEventListener("input", (e) => {
+          state.bandGain[band] = parseFloat(e.target.value);
+          applyState();
+        });
+      }
     }
     const keepEl = document.getElementById("keepawake");
     if (keepEl) {
