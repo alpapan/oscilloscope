@@ -6,13 +6,20 @@ frequency spectrum, and stereo Lissajous.
 
 ## Layout
 
-- **Desktop build**: the static web files at the project root — `index.html`,
-  `main.js`, `style.css`, `audio-*.js`, `mesh-warp.js`, `palette-color.js`,
-  `swipe-detector.js`, `mobile-ui.js`, `pixi-shim.js`. **There is no compile
-  step**; serve them over HTTP and open in a Chromium browser.
-- **Android build**: the Android Studio project under `android/`. Capacitor
-  copies the same root files into `android/app/src/main/assets/public/` via
-  `sync-www.sh` and the APK runs them in a WebView. APKs land in
+Three deployment targets, one codebase. The static web files at the
+project root (`index.html`, `main.js`, `style.css`, `audio-*.js`,
+`mesh-warp.js`, `palette-color.js`, `swipe-detector.js`, `mobile-ui.js`,
+`pixi-shim.js`) are the source of truth. **There is no separate compile
+step for the renderer code** — each platform wraps the same files.
+
+- **Desktop browser build**: serve the project root over HTTP and open in
+  a Chromium browser. See *Run it on desktop* below.
+- **Standalone Windows / macOS / Linux app**: Electron wraps the same
+  root files via `electron/main.js`. APK-equivalent installers land in
+  `dist/`. See *Standalone desktop app* below.
+- **Android build**: Capacitor copies the root files into
+  `android/app/src/main/assets/public/` via `sync-www.sh` and the APK
+  runs them in a WebView. APKs land in
   `android/app/build/outputs/apk/release/`.
 
 ## Run it on desktop
@@ -103,6 +110,43 @@ Requires JDK 21 (Adoptium Temurin), Android SDK platform 34+, build-tools
 34.0.0+. Release builds also need a release keystore wired up via
 `android/gradle.properties` (gitignored); see `docs/manual-qa.md` for the
 verification checklist.
+
+## Standalone desktop app (Electron)
+
+Scope can also be packaged as a native Windows / macOS / Linux app. The
+Electron wrapper lives in `electron/main.js` and reuses the exact same web
+assets the browser build serves — there is no second codebase. On Windows
+the wrapper auto-selects the "Entire screen" source so the user does not
+get a Chromium source picker each launch; on macOS / Linux Electron's
+`loopback` audio is best-effort and may degrade to silent video capture.
+
+### Run from source (dev)
+```bash
+npm install
+npm run electron       # opens Scope in an Electron window backed by Chromium
+```
+
+### Build a Windows installer (.exe)
+```bash
+# On a Windows machine with Node.js 20+ and npm:
+git clone <this repo>
+cd oscilloscope
+npm install
+npm run dist:win
+# Output: dist/Scope Setup 0.3.0.exe (NSIS installer, x64)
+```
+Run the produced .exe — it walks the user through install location and
+puts a Scope shortcut in the Start menu. Uninstall via Settings → Apps.
+
+Cross-building from Linux to Windows is possible with Wine + Mono
+installed (electron-builder picks them up automatically) but the supported
+path is building on the same OS family you target.
+
+### macOS / Linux variants
+```bash
+npm run dist:mac       # produces dist/Scope-0.3.0.dmg
+npm run dist:linux     # produces dist/Scope-0.3.0.AppImage
+```
 
 ## Hotkeys
 
