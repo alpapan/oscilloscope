@@ -99,11 +99,6 @@ class AudioCaptureService : Service() {
     }
 
     private fun startReader(proj: MediaProjection) {
-        val config = AudioPlaybackCaptureConfiguration.Builder(proj)
-            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-            .addMatchingUsage(AudioAttributes.USAGE_GAME)
-            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-            .build()
         val format = AudioFormat.Builder()
             .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
             .setSampleRate(SAMPLE_RATE)
@@ -117,8 +112,6 @@ class AudioCaptureService : Service() {
         // 2 channels x 4 bytes/float = 8 bytes/frame
         val bytesPerFrame = 8
         val bufferBytes = maxOf(minBytes, FRAMES_PER_CHUNK * bytesPerFrame)
-        record = buildProjectionRecord(config, format, bufferBytes)
-        record?.startRecording()
         running = true
 
         val audioMgr = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -126,6 +119,60 @@ class AudioCaptureService : Service() {
         latestToken = myToken
 
         thread = Thread({
+            // Bug C pre-warm: when capture starts AFTER an unflagged source is
+            // already playing (user opens VLC then opens Scope and taps Start),
+            // the very first AudioRecord on the freshly-granted MediaProjection
+            // reads zeros - the AudioPolicyManager does not always patch the
+            // existing track into the just-registered mix. Building a throwaway
+            // AudioRecord first, briefly starting it, then releasing it, makes
+            // the policy manager register-and-tear-down a mix; the next real
+            // AudioRecord build re-evaluates patches and the existing track is
+            // correctly routed. This is the auto version of the user's manual
+            // "stop & start" workaround, but it stays within a single consent
+            // session so the user sees only one projection dialog.
+            // try-finally so the warmRecord is always released even if the
+            // sleep is interrupted or the user taps Stop during the window
+            // where this AudioRecord exists only in this local scope.
+            var warmRecord: AudioRecord? = null
+            try {
+                val warmConfig = AudioPlaybackCaptureConfiguration.Builder(proj)
+                    .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                    .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                    .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                    .build()
+                warmRecord = AudioRecord.Builder()
+                    .setAudioFormat(format)
+                    .setBufferSizeInBytes(bufferBytes)
+                    .setAudioPlaybackCaptureConfig(warmConfig)
+                    .build()
+                warmRecord.startRecording()
+                Thread.sleep(150)
+            } catch (e: Throwable) {
+                android.util.Log.w("ScopeAudio", "Bug-C pre-warm failed: ${e.message}")
+            } finally {
+                try { warmRecord?.stop() } catch (e: Throwable) {
+                    android.util.Log.w("ScopeAudio", "warmRecord.stop() failed: ${e.message}")
+                }
+                try { warmRecord?.release() } catch (e: Throwable) {
+                    android.util.Log.w("ScopeAudio", "warmRecord.release() failed: ${e.message}")
+                }
+                try { Thread.sleep(50) } catch (_: Throwable) {}
+            }
+
+            // Build the REAL AudioRecord with a fresh config. The fresh config
+            // is intentional - reusing the warm-config's exact instance has
+            // empirically not always triggered a re-patch.
+            val config = AudioPlaybackCaptureConfiguration.Builder(proj)
+                .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                .build()
+            record = buildProjectionRecord(config, format, bufferBytes)
+            try { record?.startRecording() } catch (e: Throwable) {
+                android.util.Log.e("ScopeAudio", "Real AudioRecord startRecording failed: ${e.message}")
+                return@Thread
+            }
+
             val chunk = FloatArray(FRAMES_PER_CHUNK * 2) // interleaved L,R,L,R...
             val byteBuf = ByteBuffer.allocate(chunk.size * 4).order(ByteOrder.LITTLE_ENDIAN)
             // Re-arming silent-capture detector: instead of a one-shot flag,
@@ -173,8 +220,16 @@ class AudioCaptureService : Service() {
                                 refreshAttempted = true
                                 try { record?.stop() } catch (_: Throwable) {}
                                 try { record?.release() } catch (_: Throwable) {}
-                                record = buildProjectionRecord(config, format, bufferBytes)
-                                record?.startRecording()
+                                // Fresh config each retry; reusing the same
+                                // instance has not empirically triggered a
+                                // re-patch on Android 14+.
+                                val freshConfig = AudioPlaybackCaptureConfiguration.Builder(proj)
+                                    .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                                    .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                                    .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                                    .build()
+                                record = buildProjectionRecord(freshConfig, format, bufferBytes)
+                                try { record?.startRecording() } catch (_: Throwable) {}
                                 lastNonZeroIdx = chunkIdx
                             }
                         }

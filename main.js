@@ -1070,6 +1070,10 @@ async function init() {
 
     if (PLATFORM === "android") {
       document.body.classList.add("mobile");
+      // Defensive: start-screen is the desktop welcome card; it should never
+      // be visible on Android. HTML now has it hidden by default so this is
+      // belt-and-braces in case the attribute was cleared somewhere.
+      document.getElementById("start-screen").hidden = true;
       document.getElementById("mobile-start").hidden = false;
       document.getElementById("mobile-capture").onclick = startCapture;
       document.getElementById("mobile-stop").onclick = stopCapture;
@@ -1094,19 +1098,19 @@ async function init() {
             stopCapture();
             return;
           }
-          showCaptureBanner({
-            text: "Exit Scope?",
-            accept: "Exit",
-            onAccept: () => {
-              hideCaptureBanner();
-              window.Capacitor.Plugins.App.exitApp();
-            },
-          });
+          // Use the native modal confirm so the exit prompt is unambiguously
+          // a dialog (not another full-page "screen" stacked on mobile-start).
+          if (typeof window.confirm === "function" && window.confirm("Exit Scope?")) {
+            window.Capacitor.Plugins.App.exitApp();
+          }
         });
       }
       return;
     }
 
+    // Desktop flow: reveal the welcome card (HTML has it hidden by default
+    // so the Android path can guarantee it never paints over mobile-start).
+    document.getElementById("start-screen").hidden = false;
     document.getElementById("capture").addEventListener("click", startCapture);
     document.getElementById("stop").addEventListener("click", stopCapture);
 
