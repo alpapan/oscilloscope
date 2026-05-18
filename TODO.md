@@ -12,10 +12,4 @@ Plan review: `docs/plans/reviews/happy-snacking-cascade.md`
 - [x] **Wire visual effects into draws** - palette table, THICK_OFFSETS, multi-offset stroke, PCM smoothing, dynamic color, mesh transform, BlurFilter
 - [x] **Drawer toggles (HTML/JS web)** - both toggles in mobile drawer + desktop controls, handlers wired
 - [x] **Android setKeepScreenOn plugin** - @PluginMethod + onDestroy guard + JS wrapper
-- [ ] **Docs + build + review + commit**
-  - [x] docs/HANDOVER.md known-issues
-  - [x] docs/manual-qa.md projectM/screen-wake
-  - [x] `npm test` - 38 pass / 0 fail
-  - [x] `npm run sync && ./gradlew assembleRelease` - APK 7.3M at 17:13
-  - [ ] Dispatch code-reviewer; address every finding
-  - [ ] Single feature commit (main agent only)
+- [x] **Docs + build + review + commit** - APK 7.3M at 17:27, two reviewer rounds resolved, commit 40a9bc2, tests 43/43 green
