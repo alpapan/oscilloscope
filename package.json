@@ -10,6 +10,7 @@
     "serve": "http-server -p 8000 --cors -c-1",
     "electron": "electron .",
     "dist:win": "electron-builder --win nsis",
+    "verify:win": "osslsigncode verify -CAfile ~/.scope-signing/scope-signing.crt -in 'dist/Scope Setup 0.3.0.exe'",
     "dist:linux": "electron-builder --linux AppImage",
     "dist:mac": "electron-builder --mac dmg",
     "sync-www": "./sync-www.sh",
@@ -47,7 +48,12 @@
       "icon": "icon-512.png",
       "target": [
         { "target": "nsis", "arch": ["x64"] }
-      ]
+      ],
+      "signtoolOptions": {
+        "rfc3161TimeStampServer": "http://timestamp.digicert.com",
+        "timeStampServer": "http://timestamp.digicert.com",
+        "sign": "scripts/sign-win.js"
+      }
     },
     "nsis": {
       "oneClick": false,
