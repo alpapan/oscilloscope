@@ -62,6 +62,45 @@
     <button id="capture" type="button">Start capture</button>
     <p id="status"></p>
   </div>
+
+  <div id="mobile-start" hidden>
+    <h1>Scope</h1>
+    <p>A music oscilloscope.</p>
+    <button id="mobile-capture" type="button">Start capture</button>
+    <p>Tap Start, allow screen capture, then open Spotify or YouTube Music and play.</p>
+    <p id="mobile-status"></p>
+  </div>
+
+  <div id="mobile-toast" hidden></div>
+
+  <div id="mobile-backdrop" hidden></div>
+  <aside id="mobile-drawer" hidden>
+    <section>
+      <h2>Theme</h2>
+      <div id="mobile-theme-chips" class="chips">
+        <button type="button" data-theme="crt" class="chip">CRT</button>
+        <button type="button" data-theme="neon" class="chip">Neon</button>
+        <button type="button" data-theme="mono" class="chip">Mono</button>
+      </div>
+    </section>
+    <section>
+      <h2>Sensitivity</h2>
+      <input id="mobile-gain" type="range" min="0.1" max="4" step="0.1" value="1">
+    </section>
+    <section>
+      <h2>FFT size</h2>
+      <div class="stepper">
+        <button type="button" id="mobile-fft-prev" aria-label="Previous">&#9664;</button>
+        <span id="mobile-fft-value">2048</span>
+        <button type="button" id="mobile-fft-next" aria-label="Next">&#9654;</button>
+      </div>
+    </section>
+    <section>
+      <h2>Smoothing</h2>
+      <input id="mobile-smooth" type="range" min="0" max="0.95" step="0.05" value="0.6">
+    </section>
+    <button id="mobile-stop" type="button" class="stop">Stop</button>
+  </aside>
   <script type="module">
     // pixi-filters@6 ships no UMD/IIFE browser bundle, so it loads via
     // ESM from esm.sh. The `?external=pixi.js` parameter tells esm.sh to
@@ -76,5 +115,8 @@
     s.src = 'main.js';
     document.body.appendChild(s);
   </script>
+  <script src="audio-ring-buffer.js"></script>
+  <script src="swipe-detector.js"></script>
+  <script src="mobile-ui.js"></script>
 </body>
 </html>
