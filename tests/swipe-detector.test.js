@@ -28,11 +28,15 @@ test("clearly horizontal-dominant 1.5x or more returns the direction", () => {
   assert.equal(classifySwipe(0, 0, -75, 50), "left");
 });
 
-test("edge-zone swipes (within 16 px of left or right edge of canvas) return 'none'", () => {
+test("edge-zone swipes (within ~32 px of left or right edge of canvas) return 'none'", () => {
   // 8 px from left edge of an 800-wide canvas
   assert.equal(classifySwipe(0, 0, 100, 5, { x0: 8, canvasWidth: 800 }), "none");
+  // 24 px from left edge - still inside the (now wider) deadzone
+  assert.equal(classifySwipe(0, 0, 100, 5, { x0: 24, canvasWidth: 800 }), "none");
   // 8 px from right edge
   assert.equal(classifySwipe(0, 0, -100, 5, { x0: 792, canvasWidth: 800 }), "none");
+  // 24 px from right edge - still inside the deadzone
+  assert.equal(classifySwipe(0, 0, -100, 5, { x0: 776, canvasWidth: 800 }), "none");
   // Mid-canvas: still detects
   assert.equal(classifySwipe(0, 0, 100, 5, { x0: 400, canvasWidth: 800 }), "right");
 });

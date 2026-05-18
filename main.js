@@ -56,9 +56,14 @@ if (typeof document !== "undefined") {
 // Status surface - used by init() error handling, capture errors, and the
 // silent-input detection. Pulled into scaffolding (not inside the audio
 // section) because init() references it before the audio code is written.
+// On Android we also mirror to the mobile-start screen's status element so
+// the user sees error text even when the desktop start-screen is hidden.
 function setStatus(text) {
-  const el = typeof document !== "undefined" ? document.getElementById("status") : null;
+  if (typeof document === "undefined") return;
+  const el = document.getElementById("status");
   if (el) el.textContent = text;
+  const mel = document.getElementById("mobile-status");
+  if (mel) mel.textContent = text;
 }
 
 const state = {
@@ -66,10 +71,22 @@ const state = {
   theme: "crt",           // "crt" | "neon" | "mono"
   sensitivity: 1.0,
   fftSize: 2048,
-  smoothing: 0.6,
+  smoothing: 0.8,
   running: false,
   channels: 2,            // detected at capture start
+  autoGain: true,         // ON: envelope follower normalises; slider disabled
+  keepScreenOn: true,     // ON: request Wake Lock + Android FLAG_KEEP_SCREEN_ON
+  audioAnalysis: null,    // createAudioAnalysis instance, set after analysers up
+  audio: { bass: 0, mid: 0, treb: 0, bassAtt: 0, beat: false, beatPulse: 0, longAverage: 0 },
+  screenLock: null,       // WakeLockSentinel; set by requestScreenLock
 };
+
+// Auto-gain constants (projectM-style clamp, see plan §UI changes).
+const TARGET_LEVEL = 0.3;
+const MIN_LONG = 1e-4;
+const GAIN_MIN = 0.1;
+const GAIN_MAX = 2.0;
+const AUTO_GAIN_LERP = 0.05;
 
 const audio = {
   ctx: null,
@@ -94,10 +111,14 @@ const pixi = {
 };
 
 const themes = {
-  crt:  { fg: 0x33ff66, fgCss: "#33ff66", decayAlpha: 0.12, lineWidth: 1.5, filters: [] },
-  neon: { fg: 0x00e5ff, fgCss: "#00e5ff", decayAlpha: 1.0,  lineWidth: 2.0, filters: [] },
-  mono: { fg: 0xffffff, fgCss: "#ffffff", decayAlpha: 1.0,  lineWidth: 1.0, filters: [] },
+  crt:  { fg: 0x33ff66, fgCss: "#33ff66", decayAlpha: 0.12, lineWidth: 1.5, filters: [],
+          hueCycleRadians: Math.PI / 12, hueShiftOnBeat: 0 },
+  neon: { fg: 0x00e5ff, fgCss: "#00e5ff", decayAlpha: 1.0,  lineWidth: 2.0, filters: [],
+          hueCycleRadians: Math.PI,      hueShiftOnBeat: Math.PI / 3 },
+  mono: { fg: 0xffffff, fgCss: "#ffffff", decayAlpha: 1.0,  lineWidth: 1.0, filters: [],
+          hueCycleRadians: 0,            hueShiftOnBeat: 0 },
 };
+const THICK_OFFSETS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
 // Filters are populated inside init() once PIXI globals are available
 // (they reference new PIXI.filters.GlowFilter etc.; instantiating them at
 // module top-level would crash under node --test).
@@ -167,6 +188,16 @@ async function startCapture() {
     // Deliberately do NOT connect to ctx.destination: the user already hears
     // the source tab; routing through here would cause feedback.
 
+    if (window.AudioFeatures) {
+      state.audioAnalysis = window.AudioFeatures.createAudioAnalysis({
+        analyserL: audio.analyserL,
+        analyserR: audio.analyserR,
+        sampleRate: audio.ctx.sampleRate,
+        fftSize: state.fftSize,
+      });
+    }
+    requestScreenLock();
+
     state.running = true;
     setStatus("");
     document.getElementById("start-screen").hidden = true;
@@ -180,6 +211,32 @@ async function startCapture() {
   }
 }
 
+async function requestScreenLock() {
+  if (!state.keepScreenOn) return;
+  if (typeof navigator === "undefined" || !("wakeLock" in navigator)) {
+    // Capacitor WebView on older Android versions may lack this; the native
+    // FLAG_KEEP_SCREEN_ON path picks up the slack. Don't spam the user.
+    return;
+  }
+  try {
+    state.screenLock = await navigator.wakeLock.request("screen");
+    state.screenLock.addEventListener("release", () => { state.screenLock = null; });
+  } catch (err) {
+    setStatus(`Wake lock unavailable: ${err.message || err}`);
+  }
+}
+
+async function releaseScreenLock() {
+  try { await state.screenLock?.release(); } catch { /* already gone */ }
+  state.screenLock = null;
+}
+
+function setKeepScreenOnAndroid(enabled) {
+  const plugin = window.Capacitor?.Plugins?.ScopeAudio;
+  if (!plugin || !plugin.setKeepScreenOn) return;
+  plugin.setKeepScreenOn({ enabled }).catch(() => { /* best-effort */ });
+}
+
 function stopCapture() {
   if (PLATFORM === "android") {
     stopCaptureAndroid();
@@ -187,6 +244,8 @@ function stopCapture() {
   }
   // Idempotent: safe to call when already stopped.
   if (!state.running && !audio.stream && !audio.ctx) return;
+
+  releaseScreenLock();
 
   if (audio.stream) {
     audio.stream.getTracks().forEach(t => t.stop());
@@ -216,56 +275,86 @@ async function startCaptureAndroid() {
     return;
   }
 
+  // Build the AudioContext + worklet graph BEFORE asking for MediaProjection
+  // permission, so the click gesture is still valid for autoplay-policy
+  // purposes. If the dialog returns and the gesture has expired,
+  // audio.ctx.resume() may fail and the analysers will see zeros.
+  try {
+    audio.ctx = new AudioContext({ sampleRate: 48000 });
+    if (audio.ctx.state === "suspended") {
+      await audio.ctx.resume();
+    }
+    await audio.ctx.audioWorklet.addModule("audio-worklet-processor.js");
+  } catch (err) {
+    setStatus(`Audio init failed: ${err.message || err}`);
+    if (audio.ctx) { try { await audio.ctx.close(); } catch (_e) {} audio.ctx = null; }
+    return;
+  }
+
+  // Now ask for MediaProjection permission.
   try {
     await plugin.startCapture();
   } catch (err) {
     setStatus(`Capture denied: ${err.message || "permission rejected"}`);
+    if (audio.ctx) { try { await audio.ctx.close(); } catch (_e) {} audio.ctx = null; }
     return;
   }
 
-  audio.ctx = new AudioContext({ sampleRate: 48000 });
-  if (audio.ctx.state === "suspended") {
-    await audio.ctx.resume();
+  try {
+    // Guard against rare mono-only output devices: fall back to single channel
+    // if the destination cannot do stereo. The worklet's process() writes only
+    // outputs[0], so the right channel is just silently dropped in mono mode;
+    // the Lissajous view falls back to a vertical line (the rotated convention
+    // already handles mono correctly).
+    const outChannels = (audio.ctx.destination.maxChannelCount >= 2) ? 2 : 1;
+    state.channels = outChannels;
+    audio.workletNode = new AudioWorkletNode(audio.ctx, "scope-processor", {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [outChannels],
+    });
+    audio.gain = audio.ctx.createGain();
+    audio.gain.gain.value = state.sensitivity;
+    audio.splitter = audio.ctx.createChannelSplitter(2);
+    audio.analyserL = audio.ctx.createAnalyser();
+    audio.analyserR = audio.ctx.createAnalyser();
+    audio.analyserL.fftSize = state.fftSize;
+    audio.analyserR.fftSize = state.fftSize;
+    audio.analyserL.smoothingTimeConstant = state.smoothing;
+    audio.analyserR.smoothingTimeConstant = state.smoothing;
+
+    // Zero-gain sink - drives the rendering thread without audible output.
+    audio.silence = audio.ctx.createGain();
+    audio.silence.gain.value = 0;
+
+    audio.workletNode.connect(audio.gain);
+    audio.gain.connect(audio.splitter);
+    audio.splitter.connect(audio.analyserL, 0);
+    audio.splitter.connect(audio.analyserR, 1);
+    audio.analyserL.connect(audio.silence);
+    audio.analyserR.connect(audio.silence);
+    audio.silence.connect(audio.ctx.destination);
+
+    // Subscribe to PCM events. Removed in stopCaptureAndroid.
+    // Capacitor contract: addListener returns Promise<PluginListenerHandle>
+    // where the handle has remove(): Promise<void>. Both calls awaited.
+    audio.audioChunkHandle = await plugin.addListener("audioChunk", onAudioChunkAndroid);
+  } catch (err) {
+    setStatus(`Graph wire-up failed: ${err.message || err}`);
+    if (audio.ctx) { try { await audio.ctx.close(); } catch (_e) {} audio.ctx = null; }
+    return;
   }
-  await audio.ctx.audioWorklet.addModule("audio-worklet-processor.js");
-  // Guard against rare mono-only output devices: fall back to single channel
-  // if the destination cannot do stereo. The worklet's process() writes only
-  // outputs[0], so the right channel is just silently dropped in mono mode;
-  // the Lissajous view falls back to a vertical line (the rotated convention
-  // already handles mono correctly).
-  const outChannels = (audio.ctx.destination.maxChannelCount >= 2) ? 2 : 1;
-  state.channels = outChannels;
-  audio.workletNode = new AudioWorkletNode(audio.ctx, "scope-processor", {
-    numberOfInputs: 0,
-    numberOfOutputs: 1,
-    outputChannelCount: [outChannels],
-  });
-  audio.gain = audio.ctx.createGain();
-  audio.gain.gain.value = state.sensitivity;
-  audio.splitter = audio.ctx.createChannelSplitter(2);
-  audio.analyserL = audio.ctx.createAnalyser();
-  audio.analyserR = audio.ctx.createAnalyser();
-  audio.analyserL.fftSize = state.fftSize;
-  audio.analyserR.fftSize = state.fftSize;
-  audio.analyserL.smoothingTimeConstant = state.smoothing;
-  audio.analyserR.smoothingTimeConstant = state.smoothing;
 
-  // Zero-gain sink - drives the rendering thread without audible output.
-  audio.silence = audio.ctx.createGain();
-  audio.silence.gain.value = 0;
-
-  audio.workletNode.connect(audio.gain);
-  audio.gain.connect(audio.splitter);
-  audio.splitter.connect(audio.analyserL, 0);
-  audio.splitter.connect(audio.analyserR, 1);
-  audio.analyserL.connect(audio.silence);
-  audio.analyserR.connect(audio.silence);
-  audio.silence.connect(audio.ctx.destination);
-
-  // Subscribe to PCM events. Removed in stopCaptureAndroid.
-  // Capacitor contract: addListener returns Promise<PluginListenerHandle>
-  // where the handle has remove(): Promise<void>. Both calls awaited.
-  audio.audioChunkHandle = await plugin.addListener("audioChunk", onAudioChunkAndroid);
+  if (window.AudioFeatures) {
+    state.audioAnalysis = window.AudioFeatures.createAudioAnalysis({
+      analyserL: audio.analyserL,
+      analyserR: audio.analyserR,
+      sampleRate: audio.ctx.sampleRate,
+      fftSize: state.fftSize,
+    });
+  }
+  requestScreenLock();
+  setKeepScreenOnAndroid(state.keepScreenOn);
 
   state.running = true;
   setStatus("");
@@ -300,6 +389,9 @@ function onAudioChunkAndroid(event) {
 }
 
 async function stopCaptureAndroid() {
+  releaseScreenLock();
+  setKeepScreenOnAndroid(false);
+
   if (audio.audioChunkHandle && audio.audioChunkHandle.remove) {
     await audio.audioChunkHandle.remove();
     audio.audioChunkHandle = null;
@@ -313,6 +405,7 @@ async function stopCaptureAndroid() {
     audio.ctx = null;
   }
   audio.workletNode = audio.gain = audio.splitter = audio.analyserL = audio.analyserR = audio.silence = null;
+  state.audioAnalysis = null;
   state.running = false;
   if (typeof document !== "undefined") {
     document.getElementById("mobile-start").hidden = false;
@@ -320,7 +413,9 @@ async function stopCaptureAndroid() {
 }
 
 function applyState() {
-  if (audio.gain) {
+  // When Auto-gain is ON, the per-frame envelope follower writes gain
+  // directly; don't clobber it from the slider value.
+  if (audio.gain && !state.autoGain) {
     audio.gain.gain.value = state.sensitivity;
   }
   if (audio.analyserL && audio.analyserR) {
@@ -342,9 +437,16 @@ function applyState() {
   const smoothEl = document.getElementById("smooth");
   if (viewSel) viewSel.value = state.view;
   if (themeSel) themeSel.value = state.theme;
-  if (gainEl) gainEl.value = String(state.sensitivity);
+  if (gainEl) {
+    gainEl.value = String(state.sensitivity);
+    gainEl.disabled = !!state.autoGain;
+  }
   if (fftEl) fftEl.value = String(state.fftSize);
   if (smoothEl) smoothEl.value = String(state.smoothing);
+  const autoEl = document.getElementById("autogain");
+  if (autoEl) autoEl.checked = !!state.autoGain;
+  const keepEl = document.getElementById("keepawake");
+  if (keepEl) keepEl.checked = !!state.keepScreenOn;
 
   // Mono guard for the Lissajous tab.
   if (viewSel) {
@@ -371,6 +473,15 @@ function frame() {
   const now = performance.now();
   const dt = lastFrameTime === 0 ? 0 : now - lastFrameTime;
   lastFrameTime = now;
+
+  // Run the projectM-derived envelope follower + beat detector before
+  // anything downstream consumes state.audio (silent-threshold scan uses
+  // peak independently; auto-gain math, mesh-warp, palette-color, and
+  // hue-on-beat all read state.audio).
+  if (state.audioAnalysis) {
+    state.audio = state.audioAnalysis.update(dt / 1000, now);
+  }
+
   if (audio.analyserL) {
     const probe = new Float32Array(audio.analyserL.fftSize);
     audio.analyserL.getFloatTimeDomainData(probe);
@@ -391,6 +502,16 @@ function frame() {
     }
   }
 
+  // Auto-gain: lerp the gain node toward TARGET_LEVEL / longAverage, clamped.
+  if (state.autoGain && audio.gain && state.audio.longAverage > 0) {
+    const longAvg = Math.max(MIN_LONG, state.audio.longAverage);
+    let targetGain = TARGET_LEVEL / longAvg;
+    if (targetGain < GAIN_MIN) targetGain = GAIN_MIN;
+    else if (targetGain > GAIN_MAX) targetGain = GAIN_MAX;
+    const current = audio.gain.gain.value;
+    audio.gain.gain.value = current + (targetGain - current) * AUTO_GAIN_LERP;
+  }
+
   const theme = themes[state.theme];
   const w = window.innerWidth;
   const h = window.innerHeight;
@@ -400,7 +521,16 @@ function frame() {
   pixi.fade.rect(0, 0, w, h).fill({ color: 0x000000, alpha: theme.decayAlpha });
   pixi.app.renderer.render(pixi.fade, { renderTexture: pixi.trail, clear: false });
 
-  // Step 2: build this frame's fresh trace.
+  // Step 2: build this frame's fresh trace. mesh-warp is applied to the
+  // trail sprite each frame; bassAtt scales the rotation amplitude.
+  if (pixi.trailSprite && window.MeshWarp) {
+    const { scale, rotation } = window.MeshWarp.meshTransform(
+      state.audio.bassAtt || 0, now / 1000
+    );
+    pixi.trailSprite.scale.set(scale);
+    pixi.trailSprite.rotation = rotation;
+  }
+
   pixi.current.clear();
   if (state.view === "waveform")  drawWaveform(pixi.current, audio.analyserL, theme, w, h);
   if (state.view === "spectrum")  drawSpectrum(pixi.current, audio.analyserL, theme, w, h);
@@ -413,22 +543,83 @@ function frame() {
   requestAnimationFrame(frame);
 }
 
+// Persistent buffers for temporal smoothing across frames. AnalyserNode's
+// smoothingTimeConstant only affects getFloatFrequencyData (FFT bins), not
+// getFloatTimeDomainData - so we apply a manual lerp on top of the raw
+// time-domain data using state.smoothing as the lerp coefficient. This
+// makes the smoothing control visibly affect waveform and Lissajous, not
+// just the spectrum view.
+const smoothedTime = { L: null, R: null };
+
+function smoothBuf(slot, raw, alpha) {
+  if (alpha <= 0) return raw;
+  const prev = smoothedTime[slot];
+  if (!prev || prev.length !== raw.length) {
+    const fresh = new Float32Array(raw);
+    smoothedTime[slot] = fresh;
+    return fresh;
+  }
+  for (let i = 0; i < raw.length; i++) {
+    prev[i] = prev[i] * alpha + raw[i] * (1 - alpha);
+  }
+  return prev;
+}
+
+// Scratch buffers reused frame-to-frame for projectM's PCM 2-tap pre-smoother.
+// Allocated lazily per-channel so fftSize changes at runtime do not crash.
+const pcmScratch = { L: null, R: null };
+
+function getPcmScratch(slot, n) {
+  if (!pcmScratch[slot] || pcmScratch[slot].length !== n) {
+    pcmScratch[slot] = new Float32Array(n);
+  }
+  return pcmScratch[slot];
+}
+
+function strokeMultiOffset(g, points, theme, w, h, time, beatPulse) {
+  // Draw the polyline at 4 diagonal corner offsets at half alpha, then once
+  // centred at full alpha. Adapted from projectM's waveThick (Waveform.cpp).
+  const color = window.PaletteColor
+    ? window.PaletteColor.currentColor(theme, time, beatPulse)
+    : theme.fg;
+  for (let o = 0; o < THICK_OFFSETS.length; o++) {
+    const [dx, dy] = THICK_OFFSETS[o];
+    for (let i = 0; i < points.length; i++) {
+      const [px, py] = points[i];
+      if (i === 0) g.moveTo(px + dx, py + dy);
+      else g.lineTo(px + dx, py + dy);
+    }
+    g.stroke({ color, width: theme.lineWidth, alpha: 0.5 });
+  }
+  for (let i = 0; i < points.length; i++) {
+    const [px, py] = points[i];
+    if (i === 0) g.moveTo(px, py);
+    else g.lineTo(px, py);
+  }
+  g.stroke({ color, width: theme.lineWidth, alpha: 1.0 });
+}
+
 function drawWaveform(g, analyser, theme, w, h) {
   if (!analyser) return;
-  const buf = new Float32Array(analyser.fftSize);
-  analyser.getFloatTimeDomainData(buf);
+  const raw = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(raw);
+  const preSmooth = window.AudioFeatures
+    ? window.AudioFeatures.pcmSmooth(raw, getPcmScratch("L", raw.length))
+    : raw;
+  const buf = smoothBuf("L", preSmooth, state.smoothing);
 
   const start = findZeroCrossing(buf);
   const len = buf.length - start;
   if (len < 2) return;
 
+  const points = new Array(len);
   for (let i = 0; i < len; i++) {
     const x = (i / (len - 1)) * w;
     const y = h / 2 - buf[start + i] * (h / 2) * 0.9;
-    if (i === 0) g.moveTo(x, y);
-    else g.lineTo(x, y);
+    points[i] = [x, y];
   }
-  g.stroke({ color: theme.fg, width: theme.lineWidth });
+  const now = performance.now() / 1000;
+  strokeMultiOffset(g, points, theme, w, h, now, state.audio.beatPulse || 0);
 }
 
 function drawSpectrum(g, analyser, theme, w, h) {
@@ -440,6 +631,9 @@ function drawSpectrum(g, analyser, theme, w, h) {
   const sampleRate = audio.ctx.sampleRate;
   const minDb = -100;
   const maxDb = -30;
+  const color = window.PaletteColor
+    ? window.PaletteColor.currentColor(theme, performance.now() / 1000, state.audio.beatPulse || 0)
+    : theme.fg;
 
   // Walk the audible range (20 Hz – 20 kHz), mapping bins to log-X / dB-Y.
   let started = false;
@@ -457,38 +651,42 @@ function drawSpectrum(g, analyser, theme, w, h) {
       g.lineTo(x, y);
     }
   }
-  // Close the ribbon back to the baseline. The baseline stroke is
-  // intentional framing; split into separate fill/stroke passes if it
-  // reads as cluttered under the CRT glow filter.
   g.lineTo(w, h);
   g.lineTo(0, h);
   g.closePath();
-  g.fill({ color: theme.fg, alpha: 0.5 });
-  g.stroke({ color: theme.fg, width: theme.lineWidth });
+  g.fill({ color, alpha: 0.5 });
+  g.stroke({ color, width: theme.lineWidth });
 }
 
 function drawLissajous(g, analyserL, analyserR, theme, w, h) {
   if (!analyserL || !analyserR) return;
   const n = analyserL.fftSize;
-  const bufL = new Float32Array(n);
-  const bufR = new Float32Array(n);
-  analyserL.getFloatTimeDomainData(bufL);
-  analyserR.getFloatTimeDomainData(bufR);
+  const rawL = new Float32Array(n);
+  const rawR = new Float32Array(n);
+  analyserL.getFloatTimeDomainData(rawL);
+  analyserR.getFloatTimeDomainData(rawR);
+  const preL = window.AudioFeatures
+    ? window.AudioFeatures.pcmSmooth(rawL, getPcmScratch("L", n))
+    : rawL;
+  const preR = window.AudioFeatures
+    ? window.AudioFeatures.pcmSmooth(rawR, getPcmScratch("R", n))
+    : rawR;
+  const bufL = smoothBuf("L", preL, state.smoothing);
+  const bufR = smoothBuf("R", preR, state.smoothing);
 
   const radius = Math.min(w, h) * 0.4;
   const cx = w / 2;
   const cy = h / 2;
   const inv = 1 / Math.SQRT2;
 
+  const points = new Array(n);
   for (let i = 0; i < n; i++) {
     const xr = (bufL[i] - bufR[i]) * radius * inv;
     const yr = (bufL[i] + bufR[i]) * radius * inv;
-    const x = cx + xr;
-    const y = cy - yr;
-    if (i === 0) g.moveTo(x, y);
-    else g.lineTo(x, y);
+    points[i] = [cx + xr, cy - yr];
   }
-  g.stroke({ color: theme.fg, width: theme.lineWidth });
+  const now = performance.now() / 1000;
+  strokeMultiOffset(g, points, theme, w, h, now, state.audio.beatPulse || 0);
 }
 
 async function init() {
@@ -536,14 +734,21 @@ async function init() {
     // PIXI.filters (GlowFilter, CRTFilter, BloomFilter). If a future
     // version moves them to the top-level PIXI namespace, swap the
     // constructor lookups accordingly.
+    // BlurFilter is core PixiJS v8 (top-level, not under PIXI.filters); the
+    // pixi-shim re-exports it from window.PIXI. Appended last so it softens
+    // any preceding bloom/glow halos rather than being re-sharpened by them.
     themes.crt.filters = [
       new PIXI.filters.GlowFilter({ distance: 8, outerStrength: 1.5, color: 0x33ff66 }),
       new PIXI.filters.CRTFilter({ curvature: 1, lineWidth: 1, vignetting: 0.3 }),
+      new PIXI.BlurFilter({ strength: 2, quality: 2 }),
     ];
     themes.neon.filters = [
       new PIXI.filters.BloomFilter({ strength: { x: 8, y: 8 } }),
+      new PIXI.BlurFilter({ strength: 2, quality: 2 }),
     ];
-    themes.mono.filters = [];
+    themes.mono.filters = [
+      new PIXI.BlurFilter({ strength: 2, quality: 2 }),
+    ];
 
     // Apply default theme to trailSprite so the first frame already has filters.
     pixi.trailSprite.filters = themes[state.theme].filters;
@@ -564,6 +769,35 @@ async function init() {
       pixi.trailSprite.texture = pixi.trail;
     };
     window.addEventListener("resize", resize);
+
+    // Visibility / lifecycle: when the WebView comes back to foreground
+    // (after PiP exit, after launcher backgrounding, after lock-unlock), the
+    // AudioContext is often left in "suspended" state and the WebGL context
+    // may have been dropped. Resume audio and rebuild the trail texture so
+    // the canvas does not stay black.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") return;
+      // Wake Lock API auto-releases on page hide; re-acquire on return so
+      // Keep-screen-on survives a tab switch or PiP-exit lifecycle.
+      if (state.running && state.keepScreenOn) requestScreenLock();
+      if (audio.ctx && audio.ctx.state === "suspended") {
+        audio.ctx.resume().catch(() => {});
+      }
+      if (pixi.app && pixi.trail && pixi.trailSprite) {
+        try {
+          const vw = window.innerWidth;
+          const vh = window.innerHeight;
+          pixi.trail.destroy(true);
+          pixi.trail = PIXI.RenderTexture.create({
+            width: vw,
+            height: vh,
+            resolution: window.devicePixelRatio || 1,
+          });
+          pixi.trailSprite.texture = pixi.trail;
+        } catch (_e) {}
+      }
+      if (state.running) requestAnimationFrame(frame);
+    });
 
     if (PLATFORM === "android") {
       document.body.classList.add("mobile");
@@ -618,6 +852,28 @@ async function init() {
       state.smoothing = parseFloat(e.target.value);
       applyState();
     });
+    const autoEl = document.getElementById("autogain");
+    if (autoEl) {
+      autoEl.addEventListener("change", (e) => {
+        state.autoGain = !!e.target.checked;
+        applyState();
+      });
+    }
+    const keepEl = document.getElementById("keepawake");
+    if (keepEl) {
+      keepEl.addEventListener("change", (e) => {
+        state.keepScreenOn = !!e.target.checked;
+        if (state.keepScreenOn && state.running) requestScreenLock();
+        else releaseScreenLock();
+        setKeepScreenOnAndroid(state.keepScreenOn);
+      });
+    }
+    // Mobile drawer change handler hook (mobile-ui.js calls this).
+    window.onKeepScreenOnChange = (enabled) => {
+      if (enabled && state.running) requestScreenLock();
+      else releaseScreenLock();
+      setKeepScreenOnAndroid(enabled);
+    };
 
     document.addEventListener("keydown", (e) => {
       if (!state.running && e.key !== "Escape") return;

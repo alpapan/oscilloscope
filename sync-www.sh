@@ -13,6 +13,9 @@ for f in \
     pixi-shim.js \
     audio-ring-buffer.js \
     audio-worklet-processor.js \
+    audio-features.js \
+    palette-color.js \
+    mesh-warp.js \
     swipe-detector.js \
     mobile-ui.js \
     favicon.ico \

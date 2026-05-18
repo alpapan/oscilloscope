@@ -14,7 +14,11 @@
 
 const MIN_DISTANCE_PX = 40;
 const HORIZONTAL_RATIO = 1.5;
-const EDGE_DEAD_ZONE_PX = 16;
+// Android's system back-gesture zone is typically ~16-24dp from each edge
+// (24-72 CSS pixels on common DPRs). 32 CSS px puts our deadzone safely
+// outside the system zone on most phones so the system gesture wins
+// uncontested and our cycle/drawer swipe does not double-fire.
+const EDGE_DEAD_ZONE_PX = 32;
 
 function classifySwipe(_x, _y, dx, dy, opts) {
   if (opts && typeof opts.x0 === "number" && typeof opts.canvasWidth === "number") {

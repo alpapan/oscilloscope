@@ -45,11 +45,18 @@
       b.classList.toggle("active", b.dataset.theme === state.theme);
     });
     const gain = document.getElementById("mobile-gain");
-    if (gain) gain.value = state.sensitivity;
+    if (gain) {
+      gain.value = state.sensitivity;
+      gain.disabled = !!state.autoGain;
+    }
     const fftSpan = document.getElementById("mobile-fft-value");
     if (fftSpan) fftSpan.textContent = state.fftSize;
     const smooth = document.getElementById("mobile-smooth");
     if (smooth) smooth.value = state.smoothing;
+    const auto = document.getElementById("mobile-autogain");
+    if (auto) auto.checked = !!state.autoGain;
+    const keep = document.getElementById("mobile-keepawake");
+    if (keep) keep.checked = !!state.keepScreenOn;
   }
 
   function wireDrawer(state, applyState) {
@@ -80,43 +87,106 @@
       state.smoothing = parseFloat(e.target.value);
       applyState();
     });
+    const autoToggle = document.getElementById("mobile-autogain");
+    if (autoToggle) {
+      autoToggle.addEventListener("change", e => {
+        state.autoGain = !!e.target.checked;
+        applyState();
+        refreshDrawer(state);
+      });
+    }
+    const keepToggle = document.getElementById("mobile-keepawake");
+    if (keepToggle) {
+      keepToggle.addEventListener("change", e => {
+        state.keepScreenOn = !!e.target.checked;
+        if (typeof window.onKeepScreenOnChange === "function") {
+          window.onKeepScreenOnChange(state.keepScreenOn);
+        }
+      });
+    }
     document.getElementById("mobile-backdrop").addEventListener("click", closeDrawer);
+    const closeBtn = document.getElementById("mobile-drawer-close");
+    if (closeBtn) closeBtn.addEventListener("click", closeDrawer);
+    const exitBtn = document.getElementById("mobile-exit");
+    if (exitBtn) {
+      exitBtn.addEventListener("click", () => {
+        if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
+          window.Capacitor.Plugins.App.exitApp();
+        }
+      });
+    }
   }
 
   function wireGestures(canvas, state, applyState) {
-    // Touches are routed by stacking order. When the drawer is open the
-    // backdrop (z=30) intercepts everything that would otherwise hit the
-    // canvas (z=0), so the canvas-only handler can never see drawer-close
-    // gestures. Attach the same swipe detection to the backdrop with a
-    // drawer-aware action mapping.
+    // Canvas gestures:
+    //   - Double-tap: cycle view (replaced earlier swipe-right which fought
+    //     the Android system back gesture from the screen edge).
+    //   - Swipe-left: open the settings drawer. Edge deadzone in
+    //     classifySwipe rejects swipes starting near either screen edge so
+    //     the system back-gesture wins uncontested in that zone.
+    // Backdrop gestures (drawer open): tap closes the drawer; swipes are
+    // ignored because the backdrop tap handler is already wired.
     let x0 = 0, y0 = 0;
+    let lastTapTime = 0;
+    let lastTapX = 0, lastTapY = 0;
+    const DOUBLE_TAP_MS = 300;
+    const DOUBLE_TAP_PX = 50;
+    const TAP_MAX_DISTANCE_PX = 10;
+
     function onStart(e) {
       const t = e.changedTouches[0];
       x0 = t.clientX;
       y0 = t.clientY;
     }
+
     function onEndCanvas(e) {
       const t = e.changedTouches[0];
-      const dir = window.classifySwipe(x0, y0, t.clientX - x0, t.clientY - y0, {
+      const dx = t.clientX - x0;
+      const dy = t.clientY - y0;
+      const dist = Math.hypot(dx, dy);
+
+      // Tap (negligible movement): double-tap cycles view.
+      if (dist < TAP_MAX_DISTANCE_PX) {
+        const now = Date.now();
+        if (now - lastTapTime < DOUBLE_TAP_MS &&
+            Math.abs(t.clientX - lastTapX) < DOUBLE_TAP_PX &&
+            Math.abs(t.clientY - lastTapY) < DOUBLE_TAP_PX) {
+          cycleView(+1, state, applyState);
+          lastTapTime = 0; // reset to require a fresh double for next cycle
+        } else {
+          lastTapTime = now;
+          lastTapX = t.clientX;
+          lastTapY = t.clientY;
+        }
+        return;
+      }
+
+      // Real swipe: only swipe-left to open drawer is recognised on canvas.
+      const dir = window.classifySwipe(x0, y0, dx, dy, {
         x0,
         canvasWidth: canvas.clientWidth,
       });
-      if (dir === "right") cycleView(+1, state, applyState);
-      else if (dir === "left") openDrawer();
+      if (dir === "left") openDrawer();
     }
-    function onEndBackdrop(e) {
-      const t = e.changedTouches[0];
-      const dir = window.classifySwipe(x0, y0, t.clientX - x0, t.clientY - y0, {
-        x0,
-        canvasWidth: window.innerWidth,
-      });
-      if (dir === "right") closeDrawer();
-      // Swipe-left on backdrop is a no-op; the drawer is already open.
-    }
+
     canvas.addEventListener("touchstart", onStart, { passive: true });
     canvas.addEventListener("touchend", onEndCanvas, { passive: true });
+
+    // Backdrop (visible while drawer is open): swipe LTR closes the drawer,
+    // mirroring the swipe-RTL-opens gesture on the canvas. Same edge-deadzone
+    // discipline so the Android system back-gesture wins near screen edges.
     const backdrop = document.getElementById("mobile-backdrop");
     if (backdrop) {
+      function onEndBackdrop(e) {
+        const t = e.changedTouches[0];
+        const dx = t.clientX - x0;
+        const dy = t.clientY - y0;
+        const dir = window.classifySwipe(x0, y0, dx, dy, {
+          x0,
+          canvasWidth: window.innerWidth,
+        });
+        if (dir === "right") closeDrawer();
+      }
       backdrop.addEventListener("touchstart", onStart, { passive: true });
       backdrop.addEventListener("touchend", onEndBackdrop, { passive: true });
     }

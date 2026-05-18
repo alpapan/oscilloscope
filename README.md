@@ -32,9 +32,11 @@ Scope also runs as an Android APK with system audio loopback (Android 14+).
 
 ### Use
 1. Launch Scope; tap **Start capture**.
-2. Grant the screen-capture permission when prompted (Android does not
-   expose audio-only capture; the system always shows screen-capture
-   wording).
+2. Android shows a per-session prompt asking to start recording your screen.
+   Tap **Start now**. (Scope forces the dialog to "Entire screen" mode on
+   Android 14+ via `MediaProjectionConfig.createConfigForDefaultDisplay()`;
+   the older "Single app" option is suppressed because it scopes audio
+   capture to one app and would make Scope see silence.)
 3. Open Spotify or another music app; play something.
 4. Swipe **right** on the canvas to cycle views.
 5. Swipe **left** to open the settings drawer.

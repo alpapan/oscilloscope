@@ -74,7 +74,10 @@ the previous one succeeded.
 Verify these on a physical phone running Android 14 or newer.
 
 1. Install the APK; launch Scope.
-2. Tap **Start capture**; tap **Start now** in the system permission dialog.
+2. Tap **Start capture**. Android shows its per-session "start recording"
+   prompt (forced to Entire-screen mode via
+   `MediaProjectionConfig.createConfigForDefaultDisplay()`, so no "Single
+   app" option appears). Tap **Start now**.
 3. Open Spotify (or YouTube Music); start playback.
 4. Verify the waveform draws and reacts to the audio.
 5. Swipe right on the canvas; the view advances to spectrum; a toast appears.
@@ -95,3 +98,14 @@ Verify these on a physical phone running Android 14 or newer.
 20. Force-stop the app from Android settings; the persistent notification disappears.
 
 If any step fails, note which and file an issue; do not ship the APK.
+
+## projectM algorithms and screen-wake
+
+- [ ] **Auto-gain ON:** Switch to a quiet track then a loud track; confirm trace amplitude stays within canvas bounds without manual slider intervention.
+- [ ] **Auto-gain OFF:** Slider operates normally; toggle disabled the slider widget.
+- [ ] **Keep screen on ON (web Chrome):** In DevTools console, `state.screenLock` is a WakeLockSentinel object after capture starts; goes to null when stopped or toggle is turned off.
+- [ ] **Keep screen on ON (Android APK):** Screen stays awake during a 5-minute capture session; reverts to system sleep behaviour when toggled off mid-session.
+- [ ] **Beat-pulse latency:** 120 BPM metronome track; observe hue jumps align with kicks within one frame (~16.7 ms at 60 Hz).
+- [ ] **Multi-offset thick line:** Each palette renders waveform/Lissajous polyline with 4 corner offsets at alpha 0.5 + 1 centre stroke at alpha 1.0; total appearance is thicker without lineWidth increase.
+- [ ] **Mesh warp:** Gentle continuous wobble visible on long sessions; trail does not drift off-canvas after 5 minutes.
+- [ ] **BlurFilter:** Each palette has slight softening of edges; toggle between palettes and confirm blur is uniform across all three.
