@@ -561,6 +561,18 @@ const SILENT_MESSAGE = "No signal detected. Is the source playing?";
 
 function frame() {
   if (!state.running) return;
+  try {
+    frameBody();
+  } catch (err) {
+    // A silent throw inside frame() previously killed the rAF chain and left
+    // the user staring at solid black. Surface the message and keep trying:
+    // the next tick may succeed if it was a transient WebGL hiccup.
+    setStatus(`Render error: ${err.message || err}`);
+  }
+  requestAnimationFrame(frame);
+}
+
+function frameBody() {
   const now = performance.now();
   const dt = lastFrameTime === 0 ? 0 : now - lastFrameTime;
   lastFrameTime = now;
@@ -636,7 +648,6 @@ function frame() {
   pixi.app.renderer.render(pixi.current, { renderTexture: pixi.trail, clear: false });
 
   // PixiJS automatically presents the stage (which contains trailSprite) on the next tick.
-  requestAnimationFrame(frame);
 }
 
 // Persistent buffers for temporal smoothing across frames. AnalyserNode's

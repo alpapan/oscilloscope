@@ -5,6 +5,7 @@
   "description": "Scope music oscilloscope - Android wrapper",
   "scripts": {
     "test": "node --test tests/*.test.js",
+    "test:e2e": "playwright test",
     "sync-www": "./sync-www.sh",
     "presync": "npm run sync-www",
     "sync": "cap sync android",
@@ -17,6 +18,8 @@
     "@capacitor/core": "^7.0.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^7.0.0"
+    "@capacitor/cli": "^7.0.0",
+    "@playwright/test": "^1.60.0",
+    "http-server": "^14.1.1"
   }
 }
