@@ -82,6 +82,7 @@ const state = {
   autoGain: true,         // ON: envelope follower normalises; slider disabled
   keepScreenOn: true,     // ON: request Wake Lock + Android FLAG_KEEP_SCREEN_ON
   micMode: false,         // ON: capture via mic (works for DRM-flagged sources, degraded quality)
+  micModeAuto: false,     // ON: auto-switch to mic when projection capture is silently filtered, no prompt
   audioAnalysis: null,    // createAudioAnalysis instance, set after analysers up
   audio: { bass: 0, mid: 0, treb: 0, bassAtt: 0, beat: false, beatPulse: 0, longAverage: 0 },
   screenLock: null,       // WakeLockSentinel; set by requestScreenLock
@@ -481,18 +482,19 @@ function onAudioChunkAndroid(event) {
 
 // Called by native service when projection-mode capture is silent (zero PCM
 // for ~1s) while another app is actively playing matching audio. The track
-// is opted out via FLAG_NO_MEDIA_PROJECTION. Offer mic-mode fallback.
+// is opted out via FLAG_NO_MEDIA_PROJECTION. Offer mic-mode fallback (or
+// auto-switch if the user has opted into that in settings).
 function onSilentCapture() {
+  if (state.micModeAuto) {
+    autoSwitchToMode(true, "Switched to microphone (source is DRM-protected)");
+    return;
+  }
   showCaptureBanner({
     text: "This audio source can't be captured by Scope (DRM-protected). Use the phone's microphone instead?",
     accept: "Use microphone",
-    onAccept: async () => {
+    onAccept: () => {
       hideCaptureBanner();
-      state.micMode = true;
-      // Tear down current capture, restart via mic path. The plugin's
-      // startMicCapture handles RECORD_AUDIO permission on first call.
-      await stopCaptureAndroid();
-      await startCaptureAndroid();
+      autoSwitchToMode(true, "Switched to microphone");
     },
   });
 }
@@ -500,16 +502,47 @@ function onSilentCapture() {
 // Called by native service when mic-mode polling finds an unflagged source.
 function onUnrestrictedAvailable() {
   if (!state.micMode) return;
+  if (state.micModeAuto) {
+    autoSwitchToMode(false, "Switched back to system audio (unrestricted source available)");
+    return;
+  }
   showCaptureBanner({
     text: "An unrestricted audio source is now playing. Switch back to higher-quality system audio?",
     accept: "Switch back",
-    onAccept: async () => {
+    onAccept: () => {
       hideCaptureBanner();
-      state.micMode = false;
-      await stopCaptureAndroid();
-      await startCaptureAndroid();
+      autoSwitchToMode(false, "Switched to system audio");
     },
   });
+}
+
+// Switch between projection and mic mode without re-opening the consent
+// dialog more than necessary. Stops capture, flips state.micMode, restarts.
+// Always surfaces a toast so the user knows the source changed under them.
+// The 50ms gap between stop and start lets the previous foreground service
+// finish its onDestroy before we ask the system to start a fresh one - the
+// native stopService() is async and racing it has produced double-source
+// chunk delivery in testing.
+async function autoSwitchToMode(micMode, toastText) {
+  state.micMode = micMode;
+  showCaptureToast(toastText, 2000);
+  await stopCaptureAndroid();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  await startCaptureAndroid();
+}
+
+let captureToastTimer = null;
+function showCaptureToast(text, ms) {
+  let el = document.getElementById("capture-toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "capture-toast";
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  el.hidden = false;
+  if (captureToastTimer) clearTimeout(captureToastTimer);
+  captureToastTimer = setTimeout(() => { el.hidden = true; }, ms);
 }
 
 function showCaptureBanner({ text, accept, onAccept }) {
@@ -889,6 +922,14 @@ function drawLissajous(g, analyserL, analyserR, theme, w, h) {
 
 async function init() {
   try {
+    // Restore persistent settings from the previous session before any UI
+    // wires up, so toggles reflect the saved state on first paint.
+    try {
+      if (typeof localStorage !== "undefined") {
+        if (localStorage.getItem("scope.micModeAuto") === "true") state.micModeAuto = true;
+      }
+    } catch (_e) { /* private mode etc. - ignore */ }
+
     if (PLATFORM === "desktop" && !navigator.mediaDevices?.getDisplayMedia) {
       setStatus("This visualiser needs Chrome, Edge, or Brave. Firefox cannot capture tab audio.");
       const captureBtn = document.getElementById("capture");

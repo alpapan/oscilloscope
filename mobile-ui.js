@@ -115,6 +115,18 @@
         state.micMode = !!e.target.checked;
       });
     }
+    const micAutoToggle = document.getElementById("mobile-micmode-auto");
+    if (micAutoToggle) {
+      micAutoToggle.checked = !!state.micModeAuto;
+      micAutoToggle.addEventListener("change", e => {
+        state.micModeAuto = !!e.target.checked;
+        try {
+          if (typeof localStorage !== "undefined") {
+            localStorage.setItem("scope.micModeAuto", state.micModeAuto ? "true" : "false");
+          }
+        } catch (_e) { /* private mode etc. */ }
+      });
+    }
     for (const band of ["bass", "mid", "treb"]) {
       const el = document.getElementById(`mobile-eq-${band}`);
       if (el) {
