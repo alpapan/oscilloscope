@@ -92,6 +92,7 @@ const state = {
   keepScreenOn: true,     // ON: request Wake Lock + Android FLAG_KEEP_SCREEN_ON
   micMode: false,         // ON: capture via mic (works for DRM-flagged sources, degraded quality)
   micModeAuto: false,     // ON: auto-switch to mic when projection capture is silently filtered, no prompt
+  inAutoSwitch: false,    // TRUE during the stop->start transition of autoSwitchToMode; suppresses mobile-start re-show
   audioAnalysis: null,    // createAudioAnalysis instance, set after analysers up
   audio: { bass: 0, mid: 0, treb: 0, bassAtt: 0, beat: false, beatPulse: 0, longAverage: 0 },
   screenLock: null,       // WakeLockSentinel; set by requestScreenLock
@@ -536,9 +537,17 @@ function onUnrestrictedAvailable() {
 async function autoSwitchToMode(micMode, toastText) {
   state.micMode = micMode;
   showCaptureToast(toastText, 2000);
-  await stopCaptureAndroid();
-  await new Promise(resolve => setTimeout(resolve, 50));
-  await startCaptureAndroid();
+  // Suppress the mobile-start re-show that stopCaptureAndroid would
+  // otherwise trigger; without this, the user sees the welcome card
+  // flash for the duration of the stop->start gap.
+  state.inAutoSwitch = true;
+  try {
+    await stopCaptureAndroid();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    await startCaptureAndroid();
+  } finally {
+    state.inAutoSwitch = false;
+  }
   // (startCaptureAndroid already calls updateCaptureModeBadge after
   // flipping state.running, so no explicit call needed here.)
 }
@@ -636,7 +645,7 @@ async function stopCaptureAndroid() {
   state.audioAnalysis = null;
   state.running = false;
   updateCaptureModeBadge();
-  if (typeof document !== "undefined") {
+  if (typeof document !== "undefined" && !state.inAutoSwitch) {
     document.getElementById("mobile-start").hidden = false;
   }
 }
