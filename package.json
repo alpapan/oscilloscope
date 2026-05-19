@@ -47,7 +47,12 @@
     "win": {
       "icon": "icon-512.png",
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "signtoolOptions": {
         "rfc3161TimeStampServer": "http://timestamp.digicert.com",
@@ -77,12 +82,12 @@
     }
   },
   "dependencies": {
-    "@capacitor/android": "^7.0.0",
-    "@capacitor/app": "^7.0.0",
-    "@capacitor/core": "^7.0.0"
+    "@capacitor/android": "^8.3.4",
+    "@capacitor/app": "^8.1.0",
+    "@capacitor/core": "^8.3.4"
   },
   "devDependencies": {
-    "@capacitor/cli": "^7.0.0",
+    "@capacitor/cli": "^8.3.4",
     "@playwright/test": "^1.60.0",
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0",

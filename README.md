@@ -10,7 +10,7 @@ Three deployment targets, one codebase. The static web files at the
 project root (`index.html`, `main.js`, `style.css`, `audio-*.js`,
 `mesh-warp.js`, `palette-color.js`, `swipe-detector.js`, `mobile-ui.js`,
 `pixi-shim.js`) are the source of truth. **There is no separate compile
-step for the renderer code** — each platform wraps the same files.
+step for the renderer code**. Each platform wraps the same files.
 
 - **Desktop browser build**: serve the project root over HTTP and open in
   a Chromium browser. See *Run it on desktop* below.
@@ -101,13 +101,31 @@ normalised.
 git clone <this repo>
 cd oscilloscope
 npm install
-npm run sync         # mirrors browser assets into www/ and runs cap sync
-cd android && ./gradlew :app:assembleRelease
-# output: android/app/build/outputs/apk/release/app-release.apk
+npm run build:android
+# output: android/app/build/outputs/apk/release/scope-<version>.apk
 ```
 
-Requires JDK 21 (Adoptium Temurin), Android SDK platform 34+, build-tools
-34.0.0+. Release builds also need a release keystore wired up via
+`build:android` mirrors web assets to `www/`, runs `cap sync android`, then
+invokes `./gradlew :app:assembleRelease`.
+
+#### Toolchain
+
+| Tool | Version | Source |
+|---|---|---|
+| Capacitor | 8.x | npm `@capacitor/{core,android,cli,app}` |
+| Android Gradle Plugin | 8.13.0 | `android/build.gradle` |
+| Gradle wrapper | 8.14.3 | `android/gradle/wrapper/gradle-wrapper.properties` |
+| Kotlin | 2.2.20 | `android/build.gradle` `ext.kotlin_version` |
+| Android compileSdk / targetSdk | 36 | `android/variables.gradle` |
+| minSdk | 34 | required for `FOREGROUND_SERVICE_MEDIA_PROJECTION` |
+| JDK | **17 – 24** | not 25 — Gradle 8.14.3's classloader rejects class file major version 69 |
+
+If your system's default JDK is 25+, pin a JDK ≤ 24 by adding
+`org.gradle.java.home=/path/to/jdk` to `android/gradle.properties`
+(gitignored). Adoptium Temurin 24 lives at
+`https://adoptium.net/temurin/releases/?version=24`.
+
+Release builds also need a release keystore wired up via
 `android/gradle.properties` (gitignored); see `docs/manual-qa.md` for the
 verification checklist.
 
@@ -115,7 +133,7 @@ verification checklist.
 
 Scope can also be packaged as a native Windows / macOS / Linux app. The
 Electron wrapper lives in `electron/main.js` and reuses the exact same web
-assets the browser build serves — there is no second codebase. On Windows
+assets the browser build serves. There is no second codebase. On Windows
 the wrapper auto-selects the "Entire screen" source so the user does not
 get a Chromium source picker each launch; on macOS / Linux Electron's
 `loopback` audio is best-effort and may degrade to silent video capture.
@@ -133,9 +151,9 @@ git clone <this repo>
 cd oscilloscope
 npm install
 npm run dist:win
-# Output: dist/Scope Setup 0.3.0.exe (NSIS installer, x64)
+# Output: dist/Scope-Setup-<version>.exe (NSIS installer, x64)
 ```
-Run the produced .exe — it walks the user through install location and
+Run the produced .exe; it walks the user through install location and
 puts a Scope shortcut in the Start menu. Uninstall via Settings → Apps.
 
 Cross-building from Linux to Windows is possible with Wine + Mono
@@ -144,8 +162,8 @@ path is building on the same OS family you target.
 
 ### macOS / Linux variants
 ```bash
-npm run dist:mac       # produces dist/Scope-0.3.0.dmg
-npm run dist:linux     # produces dist/Scope-0.3.0.AppImage
+npm run dist:mac       # produces dist/Scope-<version>.dmg
+npm run dist:linux     # produces dist/Scope-<version>.AppImage
 ```
 
 ### Signed Windows build
@@ -168,7 +186,7 @@ npm run verify:win
 ```
 
 The installer is signed with the publisher CN baked into the cert (default
-"Alexie Papanicolaou" — override via `SCOPE_CERT_CN` env var when running
+"Alexie Papanicolaou"; override via `SCOPE_CERT_CN` env var when running
 the generator). To make Windows show that publisher name on UAC/SmartScreen
 instead of "Unknown publisher", import the public `scope-signing.crt` into
 the target user's `TrustedPublisher` cert store. Without that import,

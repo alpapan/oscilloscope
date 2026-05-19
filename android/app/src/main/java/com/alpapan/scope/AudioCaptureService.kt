@@ -87,13 +87,17 @@ class AudioCaptureService : Service() {
         )
 
         val pm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        projection = pm.getMediaProjection(resultCode, data).also { proj ->
-            // Per Android 14: register a callback before using projection.
-            proj.registerCallback(object : MediaProjection.Callback() {
-                override fun onStop() { stopSelf() }
-            }, null)
-            startReader(proj)
+        val proj = pm.getMediaProjection(resultCode, data)
+        if (proj == null) {
+            stopSelf()
+            return START_NOT_STICKY
         }
+        projection = proj
+        // Per Android 14: register a callback before using projection.
+        proj.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() { stopSelf() }
+        }, null)
+        startReader(proj)
 
         return START_STICKY
     }
