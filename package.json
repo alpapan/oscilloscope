@@ -1,6 +1,6 @@
 {
   "name": "scope",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Scope music oscilloscope - Android + Electron + browser",
   "main": "electron/main.js",
@@ -10,7 +10,7 @@
     "serve": "http-server -p 8000 --cors -c-1",
     "electron": "electron .",
     "dist:win": "electron-builder --win nsis",
-    "verify:win": "osslsigncode verify -CAfile ~/.scope-signing/scope-signing.crt -in dist/Scope-Setup-0.3.0.exe",
+    "verify:win": "osslsigncode verify -CAfile ~/.scope-signing/scope-signing.crt -in dist/Scope-Setup-0.3.1.exe",
     "dist:linux": "electron-builder --linux AppImage",
     "dist:mac": "electron-builder --mac dmg",
     "sync-www": "./sync-www.sh",

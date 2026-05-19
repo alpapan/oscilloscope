@@ -11,6 +11,28 @@ function freqToX(freq, width) {
   return (Math.log(freq) - minLog) / (maxLog - minLog) * width;
 }
 
+// Pure polyline of [x, y] tracing the top of the spectrum-view polygon over
+// 20 Hz – 20 kHz on log-X / dB-Y. The first vertex is anchored at x=0 so the
+// closed polygon (caller adds lineTo(w,h) / lineTo(0,h) / closePath) fills
+// the full canvas width — otherwise the lowest audible bin (typically
+// ~21-23 Hz) maps a few percent in from the left and leaves an empty strip.
+// Returns [] when no bin lies in the audible range, so the caller can skip
+// emitting a degenerate polygon.
+function spectrumPolylinePoints(freqData, sampleRate, fftSize, w, h, minDb, maxDb) {
+  const bins = freqData.length;
+  const points = [];
+  for (let i = 1; i < bins; i++) {
+    const freq = (i * sampleRate) / fftSize;
+    if (freq < 20 || freq > 20000) continue;
+    const x = freqToX(freq, w);
+    const mag = Math.max(0, Math.min(1, (freqData[i] - minDb) / (maxDb - minDb)));
+    const y = h - mag * h;
+    if (points.length === 0) points.push([0, y]);
+    points.push([x, y]);
+  }
+  return points;
+}
+
 function findZeroCrossing(buf) {
   for (let i = 0; i < buf.length - 1; i++) {
     if (buf[i] < 0 && buf[i + 1] >= 0) return i;
@@ -894,29 +916,17 @@ function drawSpectrum(g, analyser, theme, w, h) {
   const buf = new Float32Array(bins);
   analyser.getFloatFrequencyData(buf);
 
-  const sampleRate = audio.ctx.sampleRate;
-  const minDb = -100;
-  const maxDb = -30;
+  const points = spectrumPolylinePoints(
+    buf, audio.ctx.sampleRate, analyser.fftSize, w, h, -100, -30
+  );
+  if (points.length === 0) return;
+
   const color = window.PaletteColor
     ? window.PaletteColor.currentColor(theme, performance.now() / 1000, state.audio.beatPulse || 0)
     : theme.fg;
 
-  // Walk the audible range (20 Hz – 20 kHz), mapping bins to log-X / dB-Y.
-  let started = false;
-  for (let i = 1; i < bins; i++) {
-    const freq = (i * sampleRate) / analyser.fftSize;
-    if (freq < 20 || freq > 20000) continue;
-    const x = freqToX(freq, w);
-    const mag = Math.max(0, Math.min(1, (buf[i] - minDb) / (maxDb - minDb)));
-    const y = h - mag * h;
-    if (!started) {
-      g.moveTo(x, h);
-      g.lineTo(x, y);
-      started = true;
-    } else {
-      g.lineTo(x, y);
-    }
-  }
+  g.moveTo(points[0][0], points[0][1]);
+  for (let i = 1; i < points.length; i++) g.lineTo(points[i][0], points[i][1]);
   g.lineTo(w, h);
   g.lineTo(0, h);
   g.closePath();
@@ -1157,6 +1167,15 @@ async function init() {
         });
       }
     }
+    const eqResetEl = document.getElementById("eq-reset");
+    if (eqResetEl) {
+      eqResetEl.addEventListener("click", () => {
+        state.bandGain.bass = 1.0;
+        state.bandGain.mid  = 1.0;
+        state.bandGain.treb = 1.0;
+        applyState();
+      });
+    }
     const keepEl = document.getElementById("keepawake");
     if (keepEl) {
       keepEl.addEventListener("change", (e) => {
@@ -1232,5 +1251,5 @@ if (typeof window !== "undefined") {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { freqToX, findZeroCrossing, nextCaptureModeBadgeProps };
+  module.exports = { freqToX, findZeroCrossing, nextCaptureModeBadgeProps, spectrumPolylinePoints };
 }

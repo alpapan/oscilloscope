@@ -46,7 +46,7 @@
     <label><input id="keepawake" type="checkbox" checked> Keep screen on</label>
     <details>
       <summary>Advanced</summary>
-      <label>FFT size
+      <label>Detail
         <select id="fft">
           <option>256</option><option>512</option><option>1024</option>
           <option selected>2048</option><option>4096</option><option>8192</option>
@@ -65,6 +65,7 @@
       <label>EQ Treble
         <input id="eq-treb" type="range" min="0" max="2" step="0.05" value="1">
       </label>
+      <button type="button" id="eq-reset">Reset EQ</button>
     </details>
   </div>
   <div id="start-screen" hidden>
@@ -116,11 +117,11 @@
       <label class="toggle"><input id="mobile-micmode-auto" type="checkbox"> Auto-switch to microphone when source is protected</label>
     </section>
     <section>
-      <h2>FFT size</h2>
+      <h2>Detail</h2>
       <div class="stepper">
-        <button type="button" id="mobile-fft-prev" aria-label="Previous">&#9664;</button>
+        <button type="button" id="mobile-fft-prev" aria-label="Less detail">&#9664;</button>
         <span id="mobile-fft-value">2048</span>
-        <button type="button" id="mobile-fft-next" aria-label="Next">&#9654;</button>
+        <button type="button" id="mobile-fft-next" aria-label="More detail">&#9654;</button>
       </div>
     </section>
     <section>
@@ -132,6 +133,7 @@
       <label>Bass <input id="mobile-eq-bass" type="range" min="0" max="2" step="0.05" value="1"></label>
       <label>Mid <input id="mobile-eq-mid" type="range" min="0" max="2" step="0.05" value="1"></label>
       <label>Treble <input id="mobile-eq-treb" type="range" min="0" max="2" step="0.05" value="1"></label>
+      <button type="button" id="mobile-eq-reset">Reset EQ</button>
     </section>
     <button id="mobile-stop" type="button" class="stop">Stop capture</button>
     <button id="mobile-exit" type="button" class="stop">Exit app</button>

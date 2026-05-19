@@ -136,6 +136,16 @@
         });
       }
     }
+    const eqResetBtn = document.getElementById("mobile-eq-reset");
+    if (eqResetBtn) {
+      eqResetBtn.addEventListener("click", () => {
+        state.bandGain.bass = 1.0;
+        state.bandGain.mid  = 1.0;
+        state.bandGain.treb = 1.0;
+        applyState();
+        refreshDrawer(state);
+      });
+    }
     document.getElementById("mobile-backdrop").addEventListener("click", closeDrawer);
     const closeBtn = document.getElementById("mobile-drawer-close");
     if (closeBtn) closeBtn.addEventListener("click", closeDrawer);
