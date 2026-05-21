@@ -89,8 +89,8 @@
   "devDependencies": {
     "@capacitor/cli": "^8.3.4",
     "@playwright/test": "^1.60.0",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.0.0",
+    "electron": "^42.2.0",
+    "electron-builder": "^26.8.1",
     "http-server": "^14.1.1"
   }
 }
