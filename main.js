@@ -117,45 +117,30 @@ const state = {
   audioAnalysis: null,    // createAudioAnalysis instance, set after analysers up
   audio: { bass: 0, mid: 0, treb: 0, bassAtt: 0, beat: false, beatPulse: 0, longAverage: 0 },
   screenLock: null,       // WakeLockSentinel; set by requestScreenLock
-  // Fullscreen is gated: only offered after the visualiser has been actively
-  // running for >= FULLSCREEN_GATE_MS AND the user-facing setting is on.
-  // The setting defaults on; turning it off hides the button and exits any
-  // current fullscreen session.
-  runStartMs: 0,          // performance.now() at the moment running flipped true
-  fullscreenAllowed: false,
+  // Fullscreen is gated on capture being active AND the user-facing toggle
+  // being on (default on). The toggle persists to localStorage so turning
+  // it off survives session restarts.
   fullscreenEnabled: true,
+  // Android-only: track the immersive (system-bars-hidden) state ourselves
+  // since the standard Fullscreen API does not hide the status/nav bars on
+  // a Capacitor WebView. The native bridge call below does the actual hide.
+  androidImmersive: false,
 };
-const FULLSCREEN_GATE_MS = 10_000;
-
-let fullscreenGateTimer = null;
 function setRunning(val) {
   state.running = !!val;
-  if (val) {
-    state.runStartMs = (typeof performance !== "undefined") ? performance.now() : 0;
-    state.fullscreenAllowed = false;
-    if (fullscreenGateTimer) clearTimeout(fullscreenGateTimer);
-    fullscreenGateTimer = setTimeout(() => {
-      state.fullscreenAllowed = true;
-      refreshFullscreenUI();
-    }, FULLSCREEN_GATE_MS);
-  } else {
-    state.runStartMs = 0;
-    state.fullscreenAllowed = false;
-    if (fullscreenGateTimer) {
-      clearTimeout(fullscreenGateTimer);
-      fullscreenGateTimer = null;
-    }
-    if (typeof document !== "undefined" && document.fullscreenElement) {
-      document.exitFullscreen().catch(() => { /* ignored */ });
-    }
-  }
+  if (!val) exitFullscreenIfActive();
   refreshFullscreenUI();
+}
+
+function isInFullscreen() {
+  if (PLATFORM === "android") return state.androidImmersive;
+  return typeof document !== "undefined" && !!document.fullscreenElement;
 }
 
 function refreshFullscreenUI() {
   if (typeof document === "undefined") return;
-  const inFs = !!document.fullscreenElement;
-  const show = state.fullscreenEnabled && state.fullscreenAllowed;
+  const inFs = isInFullscreen();
+  const show = state.fullscreenEnabled && state.running;
   for (const id of ["mobile-fullscreen", "fullscreen"]) {
     const el = document.getElementById(id);
     if (!el) continue;
@@ -171,22 +156,43 @@ function setFullscreenEnabled(enabled) {
       localStorage.setItem("scope.fullscreenEnabled", state.fullscreenEnabled ? "true" : "false");
     }
   } catch (_e) { /* private mode etc. */ }
-  if (!state.fullscreenEnabled && typeof document !== "undefined" && document.fullscreenElement) {
-    document.exitFullscreen().catch(() => {});
-  }
+  if (!state.fullscreenEnabled) exitFullscreenIfActive();
   refreshFullscreenUI();
 }
 if (typeof window !== "undefined") window.setFullscreenEnabled = setFullscreenEnabled;
 
+async function setAndroidImmersive(enabled) {
+  if (PLATFORM !== "android") return;
+  const audioPlugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
+  if (!audioPlugin || typeof audioPlugin.setImmersive !== "function") return;
+  // Track intent unconditionally: if the bridge call fails we still want the
+  // tracked state to match the user's last toggle so the next toggle does the
+  // opposite (rather than firing the same direction again on stale state).
+  try { await audioPlugin.setImmersive({ enabled: !!enabled }); } catch (_e) { /* best-effort */ }
+  state.androidImmersive = !!enabled;
+}
+
+async function exitFullscreenIfActive() {
+  if (PLATFORM === "android") {
+    if (state.androidImmersive) await setAndroidImmersive(false);
+  } else if (typeof document !== "undefined" && document.fullscreenElement) {
+    try { await document.exitFullscreen(); } catch (_e) { /* ignore */ }
+  }
+}
+
 async function toggleFullscreen() {
   if (typeof document === "undefined") return;
-  try {
-    if (document.fullscreenElement) {
-      await document.exitFullscreen();
-    } else {
-      await document.documentElement.requestFullscreen({ navigationUI: "hide" });
-    }
-  } catch (_e) { /* user denied or unsupported; ignore */ }
+  if (PLATFORM === "android") {
+    await setAndroidImmersive(!state.androidImmersive);
+  } else {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+      }
+    } catch (_e) { /* user denied or unsupported; ignore */ }
+  }
   refreshFullscreenUI();
 }
 if (typeof window !== "undefined") window.toggleFullscreen = toggleFullscreen;
@@ -1293,7 +1299,7 @@ async function init() {
         applyState();
       }
       if (e.key === "f" || e.key === "F") {
-        if (state.fullscreenAllowed || document.fullscreenElement) toggleFullscreen();
+        if ((state.fullscreenEnabled && state.running) || isInFullscreen()) toggleFullscreen();
       }
       if (e.key === "Escape") stopCapture();
     });

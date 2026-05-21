@@ -11,6 +11,9 @@ import android.os.Build
 import android.view.WindowManager
 import androidx.activity.result.ActivityResult
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.getcapacitor.JSObject
 import com.getcapacitor.PermissionState
 import com.getcapacitor.Plugin
@@ -173,6 +176,30 @@ class ScopeAudioPlugin : Plugin() {
      *  higher-quality projection path. */
     fun notifyUnrestrictedAvailable() {
         notifyListeners("unrestrictedAvailable", JSObject())
+    }
+
+    /** Hide / show the system status and navigation bars. Browser-side
+     *  document.documentElement.requestFullscreen() does not affect them on
+     *  a Capacitor WebView, so JS toggles immersive via this bridge call
+     *  instead. BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE keeps a swipe-from-top
+     *  gesture available so the user can still pull the bars down briefly. */
+    @PluginMethod
+    fun setImmersive(call: PluginCall) {
+        val enabled = call.getBoolean("enabled", false) ?: false
+        val activity = bridge?.activity ?: return call.reject("No activity")
+        activity.runOnUiThread {
+            val window = activity.window
+            WindowCompat.setDecorFitsSystemWindows(window, !enabled)
+            val controller = WindowInsetsControllerCompat(window, window.decorView)
+            if (enabled) {
+                controller.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+            } else {
+                controller.show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+        call.resolve()
     }
 
     /** Toggle FLAG_KEEP_SCREEN_ON on the activity window. Must run on the UI
