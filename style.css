@@ -406,7 +406,9 @@ body.drawer-open #mobile-drawer { transform: translateX(0); }
 }
 
 #mobile-eq-reset,
-#eq-reset {
+#eq-reset,
+#mobile-fullscreen,
+#fullscreen {
   align-self: flex-start;
   margin-top: 4px;
   padding: 10px 18px;
@@ -422,7 +424,12 @@ body.drawer-open #mobile-drawer { transform: translateX(0); }
   min-width: 96px;
 }
 #mobile-eq-reset:active,
-#eq-reset:active { opacity: 0.6; }
+#eq-reset:active,
+#mobile-fullscreen:active,
+#fullscreen:active { opacity: 0.6; }
+
+#mobile-fullscreen[hidden],
+#fullscreen[hidden] { display: none; }
 
 #mobile-stop,
 #mobile-exit {

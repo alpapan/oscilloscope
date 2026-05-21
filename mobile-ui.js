@@ -61,6 +61,8 @@
       const el = document.getElementById(`mobile-eq-${band}`);
       if (el) el.value = String(state.bandGain[band]);
     }
+    const fsToggle = document.getElementById("mobile-allow-fullscreen");
+    if (fsToggle) fsToggle.checked = state.fullscreenEnabled !== false;
   }
 
   function wireDrawer(state, applyState) {
@@ -144,6 +146,21 @@
         state.bandGain.treb = 1.0;
         applyState();
         refreshDrawer(state);
+      });
+    }
+    const fsBtn = document.getElementById("mobile-fullscreen");
+    if (fsBtn && typeof window.toggleFullscreen === "function") {
+      fsBtn.addEventListener("click", window.toggleFullscreen);
+    }
+    const fsToggle = document.getElementById("mobile-allow-fullscreen");
+    if (fsToggle) {
+      fsToggle.checked = state.fullscreenEnabled !== false;
+      fsToggle.addEventListener("change", (e) => {
+        if (typeof window.setFullscreenEnabled === "function") {
+          window.setFullscreenEnabled(e.target.checked);
+        } else {
+          state.fullscreenEnabled = !!e.target.checked;
+        }
       });
     }
     document.getElementById("mobile-backdrop").addEventListener("click", closeDrawer);

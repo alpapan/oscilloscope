@@ -25,6 +25,7 @@
   <canvas id="stage"></canvas>
   <div id="controls" hidden>
     <button id="stop" type="button">Stop</button>
+    <button id="fullscreen" type="button" hidden>Fullscreen</button>
     <label>View
       <select id="view">
         <option value="waveform">Waveform</option>
@@ -44,6 +45,7 @@
     </label>
     <label><input id="autogain" type="checkbox" checked> Auto-gain</label>
     <label><input id="keepawake" type="checkbox" checked> Keep screen on</label>
+    <label><input id="allow-fullscreen" type="checkbox" checked> Allow fullscreen</label>
     <details>
       <summary>Advanced</summary>
       <label>Detail
@@ -117,6 +119,9 @@
       <label class="toggle"><input id="mobile-micmode-auto" type="checkbox"> Auto-switch to microphone when source is protected</label>
     </section>
     <section>
+      <label class="toggle"><input id="mobile-allow-fullscreen" type="checkbox" checked> Allow fullscreen</label>
+    </section>
+    <section>
       <h2>Detail</h2>
       <div class="stepper">
         <button type="button" id="mobile-fft-prev" aria-label="Less detail">&#9664;</button>
@@ -135,6 +140,7 @@
       <label>Treble <input id="mobile-eq-treb" type="range" min="0" max="2" step="0.05" value="1"></label>
       <button type="button" id="mobile-eq-reset">Reset EQ</button>
     </section>
+    <button id="mobile-fullscreen" type="button" class="drawer-action" hidden>Fullscreen</button>
     <button id="mobile-stop" type="button" class="stop">Stop capture</button>
     <button id="mobile-exit" type="button" class="stop">Exit app</button>
   </aside>

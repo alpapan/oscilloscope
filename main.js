@@ -117,7 +117,79 @@ const state = {
   audioAnalysis: null,    // createAudioAnalysis instance, set after analysers up
   audio: { bass: 0, mid: 0, treb: 0, bassAtt: 0, beat: false, beatPulse: 0, longAverage: 0 },
   screenLock: null,       // WakeLockSentinel; set by requestScreenLock
+  // Fullscreen is gated: only offered after the visualiser has been actively
+  // running for >= FULLSCREEN_GATE_MS AND the user-facing setting is on.
+  // The setting defaults on; turning it off hides the button and exits any
+  // current fullscreen session.
+  runStartMs: 0,          // performance.now() at the moment running flipped true
+  fullscreenAllowed: false,
+  fullscreenEnabled: true,
 };
+const FULLSCREEN_GATE_MS = 10_000;
+
+let fullscreenGateTimer = null;
+function setRunning(val) {
+  state.running = !!val;
+  if (val) {
+    state.runStartMs = (typeof performance !== "undefined") ? performance.now() : 0;
+    state.fullscreenAllowed = false;
+    if (fullscreenGateTimer) clearTimeout(fullscreenGateTimer);
+    fullscreenGateTimer = setTimeout(() => {
+      state.fullscreenAllowed = true;
+      refreshFullscreenUI();
+    }, FULLSCREEN_GATE_MS);
+  } else {
+    state.runStartMs = 0;
+    state.fullscreenAllowed = false;
+    if (fullscreenGateTimer) {
+      clearTimeout(fullscreenGateTimer);
+      fullscreenGateTimer = null;
+    }
+    if (typeof document !== "undefined" && document.fullscreenElement) {
+      document.exitFullscreen().catch(() => { /* ignored */ });
+    }
+  }
+  refreshFullscreenUI();
+}
+
+function refreshFullscreenUI() {
+  if (typeof document === "undefined") return;
+  const inFs = !!document.fullscreenElement;
+  const show = state.fullscreenEnabled && state.fullscreenAllowed;
+  for (const id of ["mobile-fullscreen", "fullscreen"]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.hidden = !show;
+    el.textContent = inFs ? "Exit fullscreen" : "Fullscreen";
+  }
+}
+
+function setFullscreenEnabled(enabled) {
+  state.fullscreenEnabled = !!enabled;
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("scope.fullscreenEnabled", state.fullscreenEnabled ? "true" : "false");
+    }
+  } catch (_e) { /* private mode etc. */ }
+  if (!state.fullscreenEnabled && typeof document !== "undefined" && document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  }
+  refreshFullscreenUI();
+}
+if (typeof window !== "undefined") window.setFullscreenEnabled = setFullscreenEnabled;
+
+async function toggleFullscreen() {
+  if (typeof document === "undefined") return;
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+    }
+  } catch (_e) { /* user denied or unsupported; ignore */ }
+  refreshFullscreenUI();
+}
+if (typeof window !== "undefined") window.toggleFullscreen = toggleFullscreen;
 
 // Auto-gain constants (projectM-style clamp, see plan §UI changes).
 const TARGET_LEVEL = 0.3;
@@ -256,7 +328,7 @@ async function startCapture() {
     }
     requestScreenLock();
 
-    state.running = true;
+    setRunning(true);
     setStatus("");
     document.getElementById("start-screen").hidden = true;
     document.getElementById("controls").hidden = false;
@@ -365,8 +437,9 @@ function stopCapture() {
   audio.bassFilter = audio.midFilter = audio.trebFilter = null;
   audio.bassMix = audio.midMix = audio.trebMix = null;
   audio.eqSum = audio.eqSplitter = audio.eqAnalyserL = audio.eqAnalyserR = null;
+  state.audioAnalysis = null;
 
-  state.running = false;
+  setRunning(false);
   // Note: we don't cancelAnimationFrame here. The in-flight rAF tick (if
   // any) will call `frame()`, see `!state.running`, and exit immediately
   // without scheduling another tick. No leaked timer; no need for a
@@ -479,7 +552,7 @@ async function startCaptureAndroid() {
   requestScreenLock();
   setKeepScreenOnAndroid(state.keepScreenOn);
 
-  state.running = true;
+  setRunning(true);
   setStatus("");
   document.getElementById("mobile-start").hidden = true;
   applyState();
@@ -661,7 +734,7 @@ async function stopCaptureAndroid(opts) {
   audio.bassMix = audio.midMix = audio.trebMix = null;
   audio.eqSum = audio.eqSplitter = audio.eqAnalyserL = audio.eqAnalyserR = null;
   state.audioAnalysis = null;
-  state.running = false;
+  setRunning(false);
   updateCaptureModeBadge();
   if (typeof document !== "undefined" && !(opts && opts.suppressMobileStartReshow)) {
     document.getElementById("mobile-start").hidden = false;
@@ -972,6 +1045,8 @@ async function init() {
     try {
       if (typeof localStorage !== "undefined") {
         if (localStorage.getItem("scope.micModeAuto") === "true") state.micModeAuto = true;
+        const fs = localStorage.getItem("scope.fullscreenEnabled");
+        if (fs === "false") state.fullscreenEnabled = false;
       }
     } catch (_e) { /* private mode etc. - ignore */ }
 
@@ -1192,6 +1267,17 @@ async function init() {
       setKeepScreenOnAndroid(enabled);
     };
 
+    document.addEventListener("fullscreenchange", refreshFullscreenUI);
+
+    const fsBtn = document.getElementById("fullscreen");
+    if (fsBtn) fsBtn.addEventListener("click", toggleFullscreen);
+
+    const fsToggle = document.getElementById("allow-fullscreen");
+    if (fsToggle) {
+      fsToggle.checked = !!state.fullscreenEnabled;
+      fsToggle.addEventListener("change", (e) => setFullscreenEnabled(e.target.checked));
+    }
+
     document.addEventListener("keydown", (e) => {
       if (!state.running && e.key !== "Escape") return;
       if (e.key === "1") { state.view = "waveform";  applyState(); }
@@ -1207,11 +1293,7 @@ async function init() {
         applyState();
       }
       if (e.key === "f" || e.key === "F") {
-        if (document.fullscreenElement) {
-          document.exitFullscreen().catch(() => {});
-        } else {
-          document.documentElement.requestFullscreen().catch(() => {});
-        }
+        if (state.fullscreenAllowed || document.fullscreenElement) toggleFullscreen();
       }
       if (e.key === "Escape") stopCapture();
     });
