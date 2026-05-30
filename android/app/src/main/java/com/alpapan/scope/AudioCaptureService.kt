@@ -428,7 +428,6 @@ class AudioCaptureService : Service() {
     }
 
     override fun onDestroy() {
-        android.util.Log.i("ScopeLife", "AudioCaptureService onDestroy - capture ending")
         running = false
         try { record?.stop() } catch (_: Throwable) {}
         try { record?.release() } catch (_: Throwable) {}
