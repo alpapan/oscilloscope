@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.media.projection.MediaProjectionConfig
 import android.media.projection.MediaProjectionManager
 import android.os.Build
@@ -23,6 +24,10 @@ import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
 import com.getcapacitor.annotation.PermissionCallback
+import org.json.JSONObject
+import kotlin.math.log10
+
+data class RenderSpec(val view: Int, val waveformPoints: Int, val fftBins: Int, val channels: Int)
 
 @CapacitorPlugin(
     name = "ScopeAudio",
@@ -39,8 +44,13 @@ class ScopeAudioPlugin : Plugin() {
         @Volatile var instance: ScopeAudioPlugin? = null
     }
 
+    private var browser: com.alpapan.scope.tv.TvBrowser? = null
+    private val sender = com.alpapan.scope.tv.PhoneSenderClient { notifyTvDisconnected() }
+    @Volatile private var spec = RenderSpec(0, 512, 256, 2)
+
     override fun load() {
         instance = this
+        sender.onControl = { json -> applyRequest(json) }
     }
 
     @PluginMethod
@@ -218,5 +228,114 @@ class ScopeAudioPlugin : Plugin() {
             }
         }
         call.resolve()
+    }
+
+    // ---- Phone-paired TV visualiser bridge ----
+
+    @PluginMethod
+    fun getFormFactor(call: PluginCall) {
+        val tv = (context.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION ||
+            context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+        call.resolve(JSObject().put("formFactor", if (tv) "tv" else "phone"))
+    }
+
+    /** Phone: start NSD browse; each resolved TV is surfaced as a `tvFound` event. */
+    @PluginMethod
+    fun discoverTvs(call: PluginCall) {
+        browser?.stop()
+        browser = com.alpapan.scope.tv.TvBrowser(context).also { b ->
+            b.start { name, host, port ->
+                notifyListeners("tvFound", JSObject().put("name", name).put("host", host).put("port", port))
+            }
+        }
+        call.resolve()
+    }
+
+    /** Phone: connect+pair to a TV, then start feeding analysis frames from capture. */
+    @PluginMethod
+    fun connectTv(call: PluginCall) {
+        val host = call.getString("host") ?: return call.reject("host")
+        val port = call.getInt("port") ?: return call.reject("port")
+        val code = call.getString("code") ?: return call.reject("code")
+        Thread {
+            val ok = try { sender.connect(host, port, code) } catch (_: Throwable) { false }
+            if (ok) {
+                com.alpapan.scope.AudioCaptureService.pcmTap = makePcmTap()
+                notifyTvConnected()
+                call.resolve()
+            } else {
+                call.reject("pairing failed")
+            }
+        }.start()
+    }
+
+    @PluginMethod
+    fun disconnectTv(call: PluginCall) {
+        com.alpapan.scope.AudioCaptureService.pcmTap = null
+        sender.close(); browser?.stop(); browser = null
+        call.resolve()
+    }
+
+    /** Bidirectional: applies the request to the phone's spec AND (if this is the
+     *  TV) forwards it to the paired phone over the control channel. */
+    @PluginMethod
+    fun sendRenderRequest(call: PluginCall) {
+        val json = call.data.toString()
+        applyRequest(json)                                          // phone-local spec (headless: drives makePcmTap)
+        com.alpapan.scope.tv.TvReceiverService.sendControl(json)    // TV -> phone (no-op if not the TV)
+        call.resolve()
+    }
+
+    /** TV: start the receiver service and return the pairing code to show. */
+    @PluginMethod
+    fun startTvReceiver(call: PluginCall) {
+        val sess = com.alpapan.scope.tv.PairingSession()
+        com.alpapan.scope.tv.TvReceiverService.session = sess
+        com.alpapan.scope.tv.TvReceiverService.onCodeRotated = { c ->
+            notifyListeners("tvPairCode", JSObject().put("code", c))
+        }
+        context.startService(Intent(context, com.alpapan.scope.tv.TvReceiverService::class.java))
+        call.resolve(JSObject().put("code", sess.code))
+    }
+
+    @PluginMethod
+    fun stopTvReceiver(call: PluginCall) {
+        context.stopService(Intent(context, com.alpapan.scope.tv.TvReceiverService::class.java))
+        call.resolve()
+    }
+
+    fun notifyTvConnected() = notifyListeners("tvConnected", JSObject())
+    fun notifyTvDisconnected() {
+        com.alpapan.scope.AudioCaptureService.pcmTap = null
+        notifyListeners("tvDisconnected", JSObject())
+    }
+    fun notifyTvRenderRequest(json: String) {
+        applyRequest(json)
+        notifyListeners("tvRenderRequest", JSObject().put("json", json))
+    }
+    fun notifyTvAnalysisFrame(b64: String) = notifyListeners("tvAnalysisFrame", JSObject().put("data", b64))
+
+    private fun applyRequest(json: String) {
+        try {
+            val o = JSONObject(json)
+            spec = RenderSpec(o.optInt("view", 0), o.optInt("waveformPoints", 512), o.optInt("fftBins", 256), o.optInt("channels", 2))
+        } catch (_: Throwable) {}
+    }
+
+    /** Capture-thread callback: serialise only the arrays the current spec names,
+     *  then hand to the sender's bounded queue (never blocks the capture reader). */
+    private fun makePcmTap(): (FloatArray, FloatArray?) -> Unit = { left, right ->
+        val s = spec
+        val frame = if (s.view == 1) {                                   // spectrum: mono mix -> FFT dB
+            val mono = FloatArray(left.size) { (left[it] + (right?.getOrElse(it) { left[it] } ?: left[it])) * 0.5f }
+            val mags = com.alpapan.scope.tv.Dsp.downsample(com.alpapan.scope.tv.Fft.magnitudes(mono), s.fftBins)
+            val db = FloatArray(mags.size) { 20f * log10((mags[it] + 1e-9f)) }
+            com.alpapan.scope.tv.AnalysisFrameCodec.encodeSpectrum(s.view, db)
+        } else {                                                          // waveform / lissajous
+            val l = com.alpapan.scope.tv.Dsp.downsample(left, s.waveformPoints)
+            val r = if (s.channels == 2 && right != null) com.alpapan.scope.tv.Dsp.downsample(right, s.waveformPoints) else null
+            com.alpapan.scope.tv.AnalysisFrameCodec.encodeWaveform(s.view, l, r)
+        }
+        sender.enqueue(frame)
     }
 }

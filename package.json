@@ -38,6 +38,7 @@
       "mesh-warp.js",
       "swipe-detector.js",
       "mobile-ui.js",
+      "tv-frame-decode.js",
       "manifest.webmanifest",
       "icon.svg",
       "icon-192.png",

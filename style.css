@@ -243,6 +243,18 @@ body.mobile #mobile-start[hidden] { display: none; }
   cursor: pointer;
 }
 #mobile-capture:active { opacity: 0.7; }
+#mobile-capture-mic {
+  padding: 16px 32px;
+  font-size: 20px;
+  background: transparent;
+  color: var(--fg);
+  border: 2px solid var(--fg);
+  border-radius: 8px;
+  min-height: 56px;
+  min-width: 220px;
+  cursor: pointer;
+}
+#mobile-capture-mic:active { opacity: 0.7; }
 
 #mobile-toast {
   position: fixed;
@@ -408,6 +420,7 @@ body.drawer-open #mobile-drawer { transform: translateX(0); }
 #mobile-eq-reset,
 #eq-reset,
 #mobile-fullscreen,
+#mobile-connect-tv,
 #fullscreen {
   align-self: flex-start;
   margin-top: 4px;
@@ -426,6 +439,7 @@ body.drawer-open #mobile-drawer { transform: translateX(0); }
 #mobile-eq-reset:active,
 #eq-reset:active,
 #mobile-fullscreen:active,
+#mobile-connect-tv:active,
 #fullscreen:active { opacity: 0.6; }
 
 #mobile-fullscreen[hidden],
@@ -450,3 +464,55 @@ body.pip #mobile-start,
 body.pip #mobile-drawer,
 body.pip #mobile-backdrop,
 body.pip #mobile-toast { display: none !important; }
+
+/* TV mode: fullscreen centred pairing-code overlay over the visualiser. */
+#tv-pair-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  pointer-events: none;
+  color: var(--fg, #33ff66);
+  background: rgba(0, 0, 0, 0.45);
+  font-size: clamp(28px, 6vw, 72px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+#tv-pair-overlay[hidden] { display: none; }
+
+/* Phone: discovered-TV picker modal injected by connectToTv(). */
+#tv-connect-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.85);
+}
+#tv-connect-modal .tv-connect-title {
+  color: var(--fg, #33ff66);
+  font-size: 20px;
+  text-align: center;
+  margin-bottom: 8px;
+}
+#tv-connect-modal .tv-connect-item {
+  min-height: 56px;
+  font-size: 18px;
+  border: 1px solid var(--fg, #33ff66);
+  background: transparent;
+  color: var(--fg, #33ff66);
+  border-radius: 8px;
+}
+#tv-connect-modal .tv-connect-cancel { border-color: #888; color: #888; }
+
+/* Pre-capture: the start card is up; the drawer shows only settings that make
+   sense before any audio is captured (live-signal tuning is hidden). */
+body.pre-capture #mobile-drawer > section:not(.pc-keep) { display: none; }
+body.pre-capture #mobile-stop { display: none; }

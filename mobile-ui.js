@@ -166,6 +166,12 @@
     document.getElementById("mobile-backdrop").addEventListener("click", closeDrawer);
     const closeBtn = document.getElementById("mobile-drawer-close");
     if (closeBtn) closeBtn.addEventListener("click", closeDrawer);
+    const connectTvBtn = document.getElementById("mobile-connect-tv");
+    if (connectTvBtn) {
+      connectTvBtn.addEventListener("click", () => {
+        if (typeof window.connectToTv === "function") window.connectToTv();
+      });
+    }
     const exitBtn = document.getElementById("mobile-exit");
     if (exitBtn) {
       exitBtn.addEventListener("click", () => {
@@ -230,6 +236,22 @@
 
     canvas.addEventListener("touchstart", onStart, { passive: true });
     canvas.addEventListener("touchend", onEndCanvas, { passive: true });
+
+    // The start card overlays the canvas before capture, swallowing the
+    // canvas swipe. Bind swipe-left -> open drawer on the start card too, so
+    // pre-capture settings (mic mode is now a button) are reachable.
+    const startCard = document.getElementById("mobile-start");
+    if (startCard) {
+      function onEndStart(e) {
+        const t = e.changedTouches[0];
+        const dx = t.clientX - x0;
+        const dy = t.clientY - y0;
+        const dir = window.classifySwipe(x0, y0, dx, dy, { x0, canvasWidth: window.innerWidth });
+        if (dir === "left") openDrawer();
+      }
+      startCard.addEventListener("touchstart", onStart, { passive: true });
+      startCard.addEventListener("touchend", onEndStart, { passive: true });
+    }
 
     // Backdrop (visible while drawer is open): swipe LTR closes the drawer,
     // mirroring the swipe-RTL-opens gesture on the canvas. Same edge-deadzone

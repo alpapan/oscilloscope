@@ -108,3 +108,11 @@ test("spectrumPolylinePoints clamps out-of-range dB to [0, 1] magnitude", () => 
   assert.strictEqual(yAtBin10, 0);
   assert.strictEqual(yAtBin20, h);
 });
+
+const { captureSourceMicMode } = require("../main.js");
+
+test("captureSourceMicMode maps mic source to true, system source to false", () => {
+  assert.equal(captureSourceMicMode("mic"), true);
+  assert.equal(captureSourceMicMode("audio"), false);
+  assert.equal(captureSourceMicMode(undefined), false);
+});

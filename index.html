@@ -80,13 +80,15 @@
   <div id="mobile-start" hidden>
     <h1>Scope</h1>
     <p>A music oscilloscope.</p>
-    <button id="mobile-capture" type="button">Start capture</button>
-    <p><strong>Start capture</strong> will capture the sound of any app. Use your music app to stream sound and come back here.</p>
+    <button id="mobile-capture" type="button">Capture audio</button>
+    <button id="mobile-capture-mic" type="button">Capture mic</button>
+    <p><strong>Capture audio</strong> grabs system sound from any app. <strong>Capture mic</strong> uses the microphone - the only way to visualise DRM-protected apps like Spotify. Play your music, then come back here.</p>
     <p>Double-tap the visualiser to cycle views. Swipe left for settings.</p>
     <p id="mobile-status"></p>
   </div>
 
   <div id="mobile-toast" hidden></div>
+  <div id="tv-pair-overlay" hidden></div>
 
   <div id="mobile-backdrop" hidden></div>
   <aside id="mobile-drawer" hidden>
@@ -94,7 +96,7 @@
       <h2 class="drawer-title">Settings</h2>
       <button id="mobile-drawer-close" type="button" aria-label="Close settings">&#x2715;</button>
     </header>
-    <section>
+    <section class="pc-keep">
       <h2>Theme</h2>
       <div id="mobile-theme-chips" class="chips">
         <button type="button" data-theme="crt" class="chip">CRT</button>
@@ -109,7 +111,7 @@
     <section>
       <label class="toggle"><input id="mobile-autogain" type="checkbox" checked> Auto-gain</label>
     </section>
-    <section>
+    <section class="pc-keep">
       <label class="toggle"><input id="mobile-keepawake" type="checkbox" checked> Keep screen on</label>
     </section>
     <section>
@@ -118,7 +120,7 @@
     <section>
       <label class="toggle"><input id="mobile-micmode-auto" type="checkbox"> Auto-switch to microphone when source is protected</label>
     </section>
-    <section>
+    <section class="pc-keep">
       <label class="toggle"><input id="mobile-allow-fullscreen" type="checkbox" checked> Allow fullscreen</label>
     </section>
     <section>
@@ -141,6 +143,7 @@
       <button type="button" id="mobile-eq-reset">Reset EQ</button>
     </section>
     <button id="mobile-fullscreen" type="button" class="drawer-action" hidden>Fullscreen</button>
+    <button id="mobile-connect-tv" type="button" class="drawer-action">Connect to TV</button>
     <button id="mobile-stop" type="button" class="stop">Stop capture</button>
     <button id="mobile-exit" type="button" class="stop">Exit app</button>
   </aside>
@@ -164,5 +167,6 @@
   <script src="palette-color.js"></script>
   <script src="mesh-warp.js"></script>
   <script src="mobile-ui.js"></script>
+  <script src="tv-frame-decode.js"></script>
 </body>
 </html>

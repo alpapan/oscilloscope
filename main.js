@@ -125,6 +125,7 @@ const state = {
   // since the standard Fullscreen API does not hide the status/nav bars on
   // a Capacitor WebView. The native bridge call below does the actual hide.
   androidImmersive: false,
+  tvMode: false,          // ON when running as the leanback TV receiver
 };
 function setRunning(val) {
   state.running = !!val;
@@ -561,6 +562,7 @@ async function startCaptureAndroid() {
   setRunning(true);
   setStatus("");
   document.getElementById("mobile-start").hidden = true;
+  document.body.classList.remove("pre-capture");
   applyState();
   updateCaptureModeBadge();
   requestAnimationFrame(frame);
@@ -744,8 +746,172 @@ async function stopCaptureAndroid(opts) {
   updateCaptureModeBadge();
   if (typeof document !== "undefined" && !(opts && opts.suppressMobileStartReshow)) {
     document.getElementById("mobile-start").hidden = false;
+    document.body.classList.add("pre-capture");
   }
 }
+
+// ---- TV mode: a receive-only renderer fed by analysis frames from a paired
+// phone. The phone captures + computes the requested arrays natively (screen
+// can be off); the TV runs the existing audio-features + draw pipeline against
+// a duck-typed AnalyserNode shim backed by the decoded frame. ----
+
+let tvFrame = null;
+let tvPairCode = null;   // latest code, kept so it persists across disconnects (plan I3)
+
+function base64ToArrayBuffer(b64) {
+  const s = atob(b64), a = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
+  return a.buffer;
+}
+
+// Nearest-pick resample of `src` into the caller-sized `out`; fills with `fb`
+// when no frame has arrived yet so the draw loop has defined buffers.
+function fillResample(out, src, fb) {
+  if (!src || !src.length) { out.fill(fb); return; }
+  const n = out.length, m = src.length;
+  for (let i = 0; i < n; i++) out[i] = src[Math.min(m - 1, (i * m / n) | 0)];
+}
+
+// Minimal AnalyserNode surface the draws + audio-features actually use:
+// getFloatTimeDomainData (waveform/lissajous + silence probe + RMS),
+// getFloatFrequencyData (spectrum, dB), getByteFrequencyData (bass/mid/treb).
+function makeTvAnalyser(getTime, getFreq) {
+  return {
+    fftSize: state.fftSize,
+    frequencyBinCount: state.fftSize >> 1,
+    smoothingTimeConstant: state.smoothing,
+    getFloatTimeDomainData(out) { fillResample(out, getTime(), 0); },
+    getFloatFrequencyData(out) { fillResample(out, getFreq(), -140); },
+    getByteFrequencyData(out) {
+      const f = getFreq();
+      if (!f || !f.length) { out.fill(0); return; }
+      const n = out.length, m = f.length;
+      for (let i = 0; i < n; i++) {
+        const db = f[Math.min(m - 1, (i * m / n) | 0)];   // dB in [-100, 0]
+        const v = Math.round((db + 100) * 2.55);          // -> [0, 255]
+        out[i] = v < 0 ? 0 : v > 255 ? 255 : v;
+      }
+    },
+  };
+}
+
+function showPairOverlay(text) {
+  if (typeof document === "undefined") return;
+  const el = document.getElementById("tv-pair-overlay");
+  if (!el) return;
+  const isCode = /^\d{4}$/.test(String(text));
+  el.textContent = isCode ? `Pair code: ${text}` : String(text);
+  el.hidden = false;
+}
+function hidePairOverlay() {
+  const el = document.getElementById("tv-pair-overlay");
+  if (el) el.hidden = true;
+}
+
+// TV view switching from the remote: D-pad right / OK cycles forward, left back.
+// cycleView updates state.view + calls applyState, which (in TV mode) sends the
+// new render-request to the paired phone so it adapts what it computes.
+function wireTvRemote() {
+  if (typeof document === "undefined") return;
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight" || e.key === "Enter") window.MobileUI?.cycleView(+1, state, applyState);
+    else if (e.key === "ArrowLeft") window.MobileUI?.cycleView(-1, state, applyState);
+  });
+}
+
+async function startTvMode() {
+  const plugin = window.Capacitor?.Plugins?.ScopeAudio;
+  if (!plugin) return;
+  audio.analyserL = makeTvAnalyser(() => tvFrame && tvFrame.waveform, () => tvFrame && tvFrame.fft);
+  audio.analyserR = makeTvAnalyser(() => tvFrame && (tvFrame.waveformR || tvFrame.waveform), () => tvFrame && tvFrame.fft);
+  if (window.AudioFeatures) {
+    state.audioAnalysis = window.AudioFeatures.createAudioAnalysis({
+      analyserL: audio.analyserL, analyserR: audio.analyserR, sampleRate: 48000, fftSize: state.fftSize,
+    });
+  }
+  await plugin.addListener("tvAnalysisFrame", e => {
+    try { tvFrame = window.decodeAnalysisFrame(base64ToArrayBuffer(e.data)); } catch (_e) { /* drop bad frame */ }
+  });
+  await plugin.addListener("tvPairCode", e => { tvPairCode = e.code; showPairOverlay(e.code); });
+  await plugin.addListener("tvConnected", () => { hidePairOverlay(); sendTvRenderRequest(); });
+  // On disconnect the code is still valid and the TV re-advertises, so keep it
+  // on screen (with a hint) rather than hiding it - a returning phone needs it.
+  await plugin.addListener("tvDisconnected", () => showPairOverlay(tvPairCode || "Waiting for phone..."));
+  wireTvRemote();
+  const res = await plugin.startTvReceiver();
+  tvPairCode = res.code;
+  showPairOverlay(res.code);
+  setRunning(true);
+  requestAnimationFrame(frame);
+}
+
+// Tell the phone which arrays to compute for the current view.
+function sendTvRenderRequest() {
+  const v = state.view === "spectrum" ? 1 : state.view === "lissajous" ? 2 : 0;
+  window.Capacitor?.Plugins?.ScopeAudio?.sendRenderRequest({
+    type: "render-request", view: v, waveformPoints: state.fftSize, fftBins: state.fftSize >> 1, channels: v === 2 ? 2 : 1,
+  });
+}
+
+// ---- Phone side: discover + pair to a TV, then stream from capture. ----
+
+function renderTvList(found) {
+  if (typeof document === "undefined") return;
+  let modal = document.getElementById("tv-connect-modal");
+  if (!modal) { modal = document.createElement("div"); modal.id = "tv-connect-modal"; document.body.appendChild(modal); }
+  modal.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "tv-connect-title";
+  title.textContent = found.length ? "Tap a TV to pair" : "Searching for TVs...";
+  modal.appendChild(title);
+  for (const tv of found) {
+    const b = document.createElement("button");
+    b.className = "tv-connect-item";
+    b.textContent = `${tv.name} (${tv.host})`;
+    b.addEventListener("click", () => pairWithTv(tv.host, tv.port));
+    modal.appendChild(b);
+  }
+  const manual = document.createElement("button");
+  manual.className = "tv-connect-item";
+  manual.textContent = "Enter IP manually";
+  manual.addEventListener("click", () => {
+    const hp = window.prompt("TV address (host:port)", "192.168.0.6:8765");
+    if (!hp) return;
+    const idx = hp.lastIndexOf(":");
+    const host = idx >= 0 ? hp.slice(0, idx).trim() : hp.trim();
+    const port = idx >= 0 ? parseInt(hp.slice(idx + 1), 10) : 8765;
+    pairWithTv(host, port);
+  });
+  modal.appendChild(manual);
+  const cancel = document.createElement("button");
+  cancel.className = "tv-connect-item tv-connect-cancel";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => modal.remove());
+  modal.appendChild(cancel);
+}
+
+async function pairWithTv(host, port) {
+  const code = window.prompt("Enter the 4-digit code shown on the TV");
+  if (!code) return;
+  document.getElementById("tv-connect-modal")?.remove();
+  try { await window.Capacitor?.Plugins?.ScopeAudio?.connectTv({ host, port, code: String(code).trim() }); }
+  catch (_e) { window.MobileUI?.showToast("Pairing failed"); }
+}
+
+async function connectToTv() {
+  const plugin = window.Capacitor?.Plugins?.ScopeAudio;
+  if (!plugin) return;
+  window.MobileUI?.closeDrawer();
+  const found = [];
+  await plugin.addListener("tvFound", e => {
+    if (!found.some(t => t.host === e.host && t.port === e.port)) { found.push(e); renderTvList(found); }
+  });
+  await plugin.addListener("tvConnected", () => window.MobileUI?.showToast("Streaming to TV"));
+  await plugin.addListener("tvDisconnected", () => window.MobileUI?.showToast("TV disconnected"));
+  renderTvList(found);
+  await plugin.discoverTvs();
+}
+if (typeof window !== "undefined") window.connectToTv = connectToTv;
 
 function applyState() {
   // When Auto-gain is ON, the per-frame envelope follower writes gain
@@ -758,6 +924,11 @@ function applyState() {
     audio.analyserR.fftSize = state.fftSize;
     audio.analyserL.smoothingTimeConstant = state.smoothing;
     audio.analyserR.smoothingTimeConstant = state.smoothing;
+  }
+  if (state.tvMode && audio.analyserL && audio.analyserR) {
+    audio.analyserL.frequencyBinCount = state.fftSize >> 1;
+    audio.analyserR.frequencyBinCount = state.fftSize >> 1;
+    sendTvRenderRequest();   // tell the phone what the new view needs
   }
   if (audio.eqAnalyserL && audio.eqAnalyserR) {
     audio.eqAnalyserL.fftSize = state.fftSize;
@@ -1166,12 +1337,27 @@ async function init() {
 
     if (PLATFORM === "android") {
       document.body.classList.add("mobile");
+      // Form-factor split: the SAME apk runs on phones and on Android TV. The
+      // TV reports leanback/uiMode television; it does no capture - it receives
+      // analysis frames from a paired phone and draws them. One activity, two
+      // boot paths (resolves the two-launcher-activity review finding).
+      const ff = await window.Capacitor?.Plugins?.ScopeAudio?.getFormFactor?.();
+      state.tvMode = !!(ff && ff.formFactor === "tv");
+      if (state.tvMode) {
+        document.body.classList.add("tv");
+        document.getElementById("start-screen").hidden = true;
+        document.getElementById("mobile-start").hidden = true;
+        await startTvMode();
+        return;   // receive-only; skip all phone capture UI wiring below
+      }
       // Defensive: start-screen is the desktop welcome card; it should never
       // be visible on Android. HTML now has it hidden by default so this is
       // belt-and-braces in case the attribute was cleared somewhere.
       document.getElementById("start-screen").hidden = true;
+      document.body.classList.add("pre-capture");
       document.getElementById("mobile-start").hidden = false;
-      document.getElementById("mobile-capture").onclick = startCapture;
+      document.getElementById("mobile-capture").onclick = () => { state.micMode = captureSourceMicMode("audio"); startCapture(); };
+      document.getElementById("mobile-capture-mic").onclick = () => { state.micMode = captureSourceMicMode("mic"); startCapture(); };
       document.getElementById("mobile-stop").onclick = stopCapture;
       MobileUI.wireDrawer(state, applyState);
       MobileUI.wireGestures(document.getElementById("stage"), state, applyState);
@@ -1338,6 +1524,10 @@ if (typeof window !== "undefined") {
   }
 }
 
+// "mic" -> microphone capture (works for DRM apps e.g. Spotify); any other
+// value -> system-audio (MediaProjection) capture.
+function captureSourceMicMode(source) { return source === "mic"; }
+
 if (typeof module !== "undefined") {
-  module.exports = { freqToX, findZeroCrossing, nextCaptureModeBadgeProps, spectrumPolylinePoints };
+  module.exports = { freqToX, findZeroCrossing, nextCaptureModeBadgeProps, spectrumPolylinePoints, captureSourceMicMode };
 }

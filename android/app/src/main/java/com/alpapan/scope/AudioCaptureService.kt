@@ -43,6 +43,11 @@ class AudioCaptureService : Service() {
         // current one when stopService()/startForegroundService() interleave.
         private val tokenSeq = java.util.concurrent.atomic.AtomicLong(0)
         @Volatile var latestToken: Long = 0L
+        // Headless TV-streaming tap. When set, each captured chunk is also
+        // delivered deinterleaved (L, R-nullable) so the plugin can compute the
+        // requested analysis frame natively and stream it - no WebView needed,
+        // so the phone screen can be off. Cleared on disconnect / capture stop.
+        @Volatile var pcmTap: ((FloatArray, FloatArray?) -> Unit)? = null
     }
 
     @Volatile private var running = false
@@ -239,6 +244,12 @@ class AudioCaptureService : Service() {
                         }
                     }
                 }
+                pcmTap?.let { tap ->
+                    val frames = n / 2
+                    val l = FloatArray(frames); val r = FloatArray(frames)
+                    var jj = 0; for (i in 0 until frames) { l[i] = chunk[jj]; r[i] = chunk[jj + 1]; jj += 2 }
+                    tap(l, r)
+                }
                 byteBuf.clear()
                 for (j in 0 until n) byteBuf.putFloat(chunk[j])
                 byteBuf.flip()
@@ -390,6 +401,7 @@ class AudioCaptureService : Service() {
                         pluginRef?.notifyUnrestrictedAvailable()
                     }
                 }
+                pcmTap?.invoke(mono.copyOf(n), null)
                 byteBuf.clear()
                 for (i in 0 until n) {
                     byteBuf.putFloat(mono[i])

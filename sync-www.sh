@@ -18,6 +18,7 @@ for f in \
     mesh-warp.js \
     swipe-detector.js \
     mobile-ui.js \
+    tv-frame-decode.js \
     favicon.ico \
     icon.svg \
     icon-192.png \
