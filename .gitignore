@@ -31,3 +31,9 @@ test-results/
 
 # Session handoff notes - local-only working state, not for the repo
 docs/HANDOFF-*.md
+
+# Working artefacts - kept local, never committed (see CLAUDE.md "Git is for code")
+CLAUDE.md
+docs/evidence/
+docs/plans/
+docs/superpowers/specs/
