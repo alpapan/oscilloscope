@@ -1,5 +1,6 @@
 // Scope - Music Oscilloscope
 // See docs/superpowers/specs/2026-05-16-music-oscilloscope-design.md
+/** @ts-check */
 
 // =============================================================================
 // Pure helpers (also testable in Node)
@@ -757,6 +758,8 @@ async function stopCaptureAndroid(opts) {
 
 let tvFrame = null;
 let tvPairCode = null;   // latest code, kept so it persists across disconnects (plan I3)
+let tvLanIp = null;      // this TV's LAN IPv4, shown so a phone can type it manually
+const TV_PORT = 8765;    // receiver port; matches TvReceiverService.PORT
 
 function base64ToArrayBuffer(b64) {
   const s = atob(b64), a = new Uint8Array(s.length);
@@ -769,7 +772,14 @@ function base64ToArrayBuffer(b64) {
 function fillResample(out, src, fb) {
   if (!src || !src.length) { out.fill(fb); return; }
   const n = out.length, m = src.length;
-  for (let i = 0; i < n; i++) out[i] = src[Math.min(m - 1, (i * m / n) | 0)];
+  if (m === 1 || n === 1) { out.fill(src[0]); return; }
+  // Linear interpolation (not nearest-pick) so a low-point-count frame upsized
+  // to the draw buffer is smooth, not staircased.
+  for (let i = 0; i < n; i++) {
+    const pos = i * (m - 1) / (n - 1);
+    const lo = pos | 0, hi = Math.min(m - 1, lo + 1), t = pos - lo;
+    out[i] = src[lo] * (1 - t) + src[hi] * t;
+  }
 }
 
 // Minimal AnalyserNode surface the draws + audio-features actually use:
@@ -795,12 +805,31 @@ function makeTvAnalyser(getTime, getFreq) {
   };
 }
 
+// Pure: builds the two overlay lines. `main` is the pair code (or a status
+// message); `sub` is the LAN address a phone can type when discovery fails.
+function pairOverlayLines({ text, ip, port }) {
+  const isCode = /^\d{4}$/.test(String(text));
+  const main = isCode ? `Pair code: ${text}` : String(text);
+  const sub = ip ? `${ip}:${port}` : "";
+  return { main, sub };
+}
+
 function showPairOverlay(text) {
   if (typeof document === "undefined") return;
   const el = document.getElementById("tv-pair-overlay");
   if (!el) return;
-  const isCode = /^\d{4}$/.test(String(text));
-  el.textContent = isCode ? `Pair code: ${text}` : String(text);
+  const { main, sub } = pairOverlayLines({ text, ip: tvLanIp, port: TV_PORT });
+  el.innerHTML = "";
+  const m = document.createElement("div");
+  m.className = "tv-pair-main";
+  m.textContent = main;
+  el.appendChild(m);
+  if (sub) {
+    const s = document.createElement("div");
+    s.className = "tv-pair-sub";
+    s.textContent = sub;
+    el.appendChild(s);
+  }
   el.hidden = false;
 }
 function hidePairOverlay() {
@@ -840,6 +869,7 @@ async function startTvMode() {
   wireTvRemote();
   const res = await plugin.startTvReceiver();
   tvPairCode = res.code;
+  tvLanIp = res.ip || null;
   showPairOverlay(res.code);
   setRunning(true);
   requestAnimationFrame(frame);
@@ -890,11 +920,54 @@ function renderTvList(found) {
   modal.appendChild(cancel);
 }
 
+// Keep only digits, capped at 4 - the pairing code is always 4 digits.
+function sanitizePairCode(raw) {
+  return String(raw == null ? "" : raw).replace(/\D/g, "").slice(0, 4);
+}
+
+// In-DOM numeric code entry. window.prompt cannot request a numeric keyboard
+// or reliably autofocus, so build a small modal whose input raises the digits
+// soft-keyboard on focus. Resolves to the 4-digit string, or null on cancel.
+function promptPairCode() {
+  return new Promise((resolve) => {
+    if (typeof document === "undefined") { resolve(null); return; }
+    const modal = document.createElement("div");
+    modal.id = "tv-code-modal";
+    const title = document.createElement("div");
+    title.className = "tv-connect-title";
+    title.textContent = "Enter the 4-digit code shown on the TV";
+    const input = document.createElement("input");
+    input.id = "tv-code-input";
+    input.type = "tel";
+    input.inputMode = "numeric";
+    input.maxLength = 4;
+    input.setAttribute("pattern", "[0-9]*");
+    input.setAttribute("autocomplete", "one-time-code");
+    input.addEventListener("input", () => { input.value = sanitizePairCode(input.value); });
+    let settled = false;
+    const done = (val) => { if (settled) return; settled = true; modal.remove(); resolve(val); };
+    const ok = document.createElement("button");
+    ok.className = "tv-connect-item";
+    ok.textContent = "Pair";
+    ok.addEventListener("click", () => done(sanitizePairCode(input.value)));
+    const cancel = document.createElement("button");
+    cancel.className = "tv-connect-item tv-connect-cancel";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => done(null));
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") done(sanitizePairCode(input.value)); });
+    modal.appendChild(title); modal.appendChild(input); modal.appendChild(ok); modal.appendChild(cancel);
+    document.body.appendChild(modal);
+    // Focus synchronously within the originating tap so Android raises the
+    // numeric soft keyboard immediately.
+    input.focus();
+  });
+}
+
 async function pairWithTv(host, port) {
-  const code = window.prompt("Enter the 4-digit code shown on the TV");
+  const code = await promptPairCode();
   if (!code) return;
   document.getElementById("tv-connect-modal")?.remove();
-  try { await window.Capacitor?.Plugins?.ScopeAudio?.connectTv({ host, port, code: String(code).trim() }); }
+  try { await window.Capacitor?.Plugins?.ScopeAudio?.connectTv({ host, port, code }); }
   catch (_e) { window.MobileUI?.showToast("Pairing failed"); }
 }
 
@@ -1215,6 +1288,20 @@ function drawLissajous(g, analyserL, analyserR, theme, w, h) {
   strokeMultiOffset(g, points, theme, w, h, now, state.audio.beatPulse || 0);
 }
 
+// Fetch the native app version once and fill any present version labels
+// (TV bottom-right, phone settings drawer). Blank in a browser with no plugin.
+async function loadVersionLabels() {
+  if (typeof document === "undefined") return;
+  const plugin = window.Capacitor?.Plugins?.ScopeAudio;
+  let version = "";
+  try { version = (await plugin?.getAppVersion?.())?.version || ""; } catch (_e) { /* browser / no plugin */ }
+  const label = formatVersionLabel(version);
+  for (const id of ["tv-version", "mobile-version"]) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = label;
+  }
+}
+
 async function init() {
   try {
     // Restore persistent settings from the previous session before any UI
@@ -1337,6 +1424,7 @@ async function init() {
 
     if (PLATFORM === "android") {
       document.body.classList.add("mobile");
+      await loadVersionLabels();   // fills TV + phone version labels (both apks)
       // Form-factor split: the SAME apk runs on phones and on Android TV. The
       // TV reports leanback/uiMode television; it does no capture - it receives
       // analysis frames from a paired phone and draws them. One activity, two
@@ -1528,6 +1616,14 @@ if (typeof window !== "undefined") {
 // value -> system-audio (MediaProjection) capture.
 function captureSourceMicMode(source) { return source === "mic"; }
 
+// "0.3.3" -> "v0.3.3"; empty/missing -> "" (so the label simply stays blank
+// in a browser where the native getAppVersion plugin call is unavailable).
+function formatVersionLabel(v) {
+  if (!v) return "";
+  const s = String(v);
+  return s.startsWith("v") ? s : `v${s}`;
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { freqToX, findZeroCrossing, nextCaptureModeBadgeProps, spectrumPolylinePoints, captureSourceMicMode };
+  module.exports = { freqToX, findZeroCrossing, nextCaptureModeBadgeProps, spectrumPolylinePoints, captureSourceMicMode, pairOverlayLines, formatVersionLabel, fillResample, sanitizePairCode };
 }

@@ -1,5 +1,6 @@
 package com.alpapan.scope
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -107,6 +108,10 @@ class AudioCaptureService : Service() {
         return START_STICKY
     }
 
+    // RECORD_AUDIO is declared in the manifest and playback capture is gated by
+    // the MediaProjection consent, so the AudioRecord builds here are safe; lint
+    // can't trace that across the service boundary.
+    @SuppressLint("MissingPermission")
     private fun startReader(proj: MediaProjection) {
         val format = AudioFormat.Builder()
             .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
@@ -263,6 +268,7 @@ class AudioCaptureService : Service() {
         }, "ScopeAudioReader").also { it.start() }
     }
 
+    @SuppressLint("MissingPermission")
     private fun buildProjectionRecord(
         config: AudioPlaybackCaptureConfiguration,
         format: AudioFormat,
@@ -328,6 +334,9 @@ class AudioCaptureService : Service() {
         return false
     }
 
+    // RECORD_AUDIO is verified granted in ScopeAudioPlugin.startMicCapture before
+    // this service is started; the build here is safe. Lint can't see that path.
+    @SuppressLint("MissingPermission")
     private fun startMicReader() {
         // Mic-source AudioRecord. Bypasses AudioPlaybackCapture and is therefore
         // immune to FLAG_NO_MEDIA_PROJECTION (Spotify, Chrome WAV) opt-outs.
@@ -419,6 +428,7 @@ class AudioCaptureService : Service() {
     }
 
     override fun onDestroy() {
+        android.util.Log.i("ScopeLife", "AudioCaptureService onDestroy - capture ending")
         running = false
         try { record?.stop() } catch (_: Throwable) {}
         try { record?.release() } catch (_: Throwable) {}

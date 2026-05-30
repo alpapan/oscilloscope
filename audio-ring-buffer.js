@@ -60,5 +60,6 @@ if (typeof module !== "undefined" && module.exports) {
 // copy because AudioWorkletGlobalScope is isolated). Exposed only for ad-hoc
 // debugging from DevTools.
 if (typeof globalThis !== "undefined") {
+  // @ts-expect-error - RingBuffer is defined locally and assigned to global scope
   globalThis.RingBuffer = RingBuffer;
 }

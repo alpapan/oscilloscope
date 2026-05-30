@@ -112,7 +112,13 @@ class MainActivity : BridgeActivity() {
         //     onStop. Locking the phone while still in PiP keeps the flag true,
         //     so capture survives screen-off. Expanding PiP back to fullscreen
         //     does not call onStop at all, so capture also survives that path.
-        if (isFinishing || !isInPictureInPictureMode) {
+        //   streamingToTv = true: the phone is a headless TV streamer, so it must
+        //     keep capturing even with no PiP and no focus (else mic dies on
+        //     background and never restarts).
+        val streaming = ScopeAudioPlugin.instance?.isStreamingToTv == true
+        val willStop = CaptureLifecycle.shouldStopOnStop(isFinishing, isInPictureInPictureMode, streaming)
+        android.util.Log.i("ScopeLife", "onStop finishing=$isFinishing pip=$isInPictureInPictureMode streamingTv=$streaming -> ${if (willStop) "STOP service" else "keep capturing"}")
+        if (willStop) {
             stopService(Intent(this, AudioCaptureService::class.java))
             ScopeAudioPlugin.instance?.markStopped()
         }

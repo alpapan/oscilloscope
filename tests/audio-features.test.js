@@ -130,7 +130,7 @@ test("createAudioAnalysis: factory bundles update into one state snapshot", () =
   for (let i = 11; i < 1024; i++) bins[i] = 5;            // mid/treble quiet
   const analyser = fakeAnalyser(bins);
   const af = createAudioAnalysis({
-    analyserL: analyser, analyserR: analyser,
+    analyserL: analyser,
     sampleRate: 48000, fftSize: 2048,
   });
 
@@ -157,7 +157,7 @@ test("createAudioAnalysis: factory bundles update into one state snapshot", () =
 
 test("createAudioAnalysis: null analyser returns zero state without crashing", () => {
   const af = createAudioAnalysis({
-    analyserL: null, analyserR: null, sampleRate: 48000, fftSize: 2048,
+    analyserL: null, sampleRate: 48000, fftSize: 2048,
   });
   const s = af.update(1 / 60, 0);
   assert.equal(s.bass, 0);
@@ -176,7 +176,7 @@ test("createAudioAnalysis: tracks time-domain RMS for auto-gain", () => {
   const bins = new Uint8Array(1024);             // freq side: zeros, doesn't matter
   const analyser = fakeAnalyser(bins, td);
   const af = createAudioAnalysis({
-    analyserL: analyser, analyserR: analyser, sampleRate: 48000, fftSize,
+    analyserL: analyser, sampleRate: 48000, fftSize,
   });
 
   const first = af.update(1 / 60, 0);
@@ -204,7 +204,7 @@ test("createAudioAnalysis: rms responds to amplitude changes faster than rmsLong
     getFloatTimeDomainData(out) { out.set(timeData); },
   };
   const af = createAudioAnalysis({
-    analyserL: analyser, analyserR: analyser, sampleRate: 48000, fftSize,
+    analyserL: analyser, sampleRate: 48000, fftSize,
   });
   for (let i = 0; i < 60; i++) af.update(1 / 60, i * 16.7);
   timeData = loud;

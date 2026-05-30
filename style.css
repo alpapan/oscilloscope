@@ -470,21 +470,48 @@ body.pip #mobile-toast { display: none !important; }
   position: fixed;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 0.25em;
   z-index: 50;
   pointer-events: none;
   color: var(--fg, #33ff66);
   background: rgba(0, 0, 0, 0.45);
+  text-align: center;
+}
+#tv-pair-overlay .tv-pair-main {
   font-size: clamp(28px, 6vw, 72px);
   font-weight: 600;
   letter-spacing: 0.08em;
-  text-align: center;
+}
+#tv-pair-overlay .tv-pair-sub {
+  font-size: clamp(14px, 2.6vw, 30px);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
 }
 #tv-pair-overlay[hidden] { display: none; }
 
-/* Phone: discovered-TV picker modal injected by connectToTv(). */
-#tv-connect-modal {
+/* TV mode only: app version, smallest text, pinned bottom-right. Hidden on
+   phones (where the version lives in the settings drawer instead). */
+#tv-version { display: none; }
+body.tv #tv-version {
+  display: block;
+  position: fixed;
+  right: 16px;
+  bottom: 10px;
+  z-index: 51;
+  pointer-events: none;
+  color: var(--fg, #33ff66);
+  opacity: 0.5;
+  font-size: clamp(10px, 1.8vw, 18px);
+  letter-spacing: 0.03em;
+}
+
+/* Phone: discovered-TV picker + pair-code entry modals. */
+#tv-connect-modal,
+#tv-code-modal {
   position: fixed;
   inset: 0;
   z-index: 60;
@@ -496,13 +523,15 @@ body.pip #mobile-toast { display: none !important; }
   padding: 24px;
   background: rgba(0, 0, 0, 0.85);
 }
-#tv-connect-modal .tv-connect-title {
+#tv-connect-modal .tv-connect-title,
+#tv-code-modal .tv-connect-title {
   color: var(--fg, #33ff66);
   font-size: 20px;
   text-align: center;
   margin-bottom: 8px;
 }
-#tv-connect-modal .tv-connect-item {
+#tv-connect-modal .tv-connect-item,
+#tv-code-modal .tv-connect-item {
   min-height: 56px;
   font-size: 18px;
   border: 1px solid var(--fg, #33ff66);
@@ -510,7 +539,31 @@ body.pip #mobile-toast { display: none !important; }
   color: var(--fg, #33ff66);
   border-radius: 8px;
 }
-#tv-connect-modal .tv-connect-cancel { border-color: #888; color: #888; }
+#tv-connect-modal .tv-connect-cancel,
+#tv-code-modal .tv-connect-cancel { border-color: #888; color: #888; }
+/* Pair-code field: big centred digits, themed, comfortably tappable. */
+#tv-code-input {
+  min-height: 56px;
+  border: 1px solid var(--fg, #33ff66);
+  background: transparent;
+  color: var(--fg, #33ff66);
+  border-radius: 8px;
+  text-align: center;
+  font-size: 32px;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+}
+
+/* App version at the very bottom of the settings drawer; small and muted.
+   A <p> (not a section) so the pre-capture filter below leaves it visible in
+   both drawer states. */
+#mobile-version {
+  margin: 12px 0 4px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--fg, #33ff66);
+  opacity: 0.45;
+}
 
 /* Pre-capture: the start card is up; the drawer shows only settings that make
    sense before any audio is captured (live-signal tuning is hidden). */

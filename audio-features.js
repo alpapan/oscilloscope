@@ -78,7 +78,7 @@ function createBeatDetector(tracker, { threshold, refractoryMs }) {
   return { update };
 }
 
-function createAudioAnalysis({ analyserL, analyserR, sampleRate, fftSize }) {
+function createAudioAnalysis({ analyserL, sampleRate, fftSize }) {
   const timeBuf = new Float32Array(fftSize);
   const freqBins = new Uint8Array(fftSize / 2);
   const freqLin = new Float32Array(fftSize / 2);

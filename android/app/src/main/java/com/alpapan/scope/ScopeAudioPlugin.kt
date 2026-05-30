@@ -40,6 +40,10 @@ class ScopeAudioPlugin : Plugin() {
     @Volatile var isCapturing: Boolean = false
         private set
 
+    /** True while a paired TV is actively receiving frames. The phone then acts
+     *  as a headless streamer, so capture must survive losing window focus. */
+    val isStreamingToTv: Boolean get() = sender.connected
+
     companion object {
         @Volatile var instance: ScopeAudioPlugin? = null
     }
@@ -232,6 +236,15 @@ class ScopeAudioPlugin : Plugin() {
 
     // ---- Phone-paired TV visualiser bridge ----
 
+    /** Returns the app's versionName (from the package manager) for display. */
+    @PluginMethod
+    fun getAppVersion(call: PluginCall) {
+        val name = try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        } catch (_: Throwable) { null }
+        call.resolve(JSObject().put("version", name ?: ""))
+    }
+
     @PluginMethod
     fun getFormFactor(call: PluginCall) {
         val tv = (context.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION ||
@@ -295,7 +308,7 @@ class ScopeAudioPlugin : Plugin() {
             notifyListeners("tvPairCode", JSObject().put("code", c))
         }
         context.startService(Intent(context, com.alpapan.scope.tv.TvReceiverService::class.java))
-        call.resolve(JSObject().put("code", sess.code))
+        call.resolve(JSObject().put("code", sess.code).put("ip", com.alpapan.scope.tv.LanIp.current()))
     }
 
     @PluginMethod
