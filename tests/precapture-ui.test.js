@@ -43,6 +43,13 @@ test("capture-mic and connect-tv buttons are themed and meet the 44px touch floo
   assert.match(mic, /var\(--fg\)/);
   const micH = Number((mic.match(/min-height:\s*(\d+)px/) || [])[1]);
   assert.ok(micH >= 44, `capture-mic min-height ${micH} must be >= 44`);
-  // Connect to TV joins the themed drawer-action group (green outline, 48px).
-  assert.match(css, /#mobile-connect-tv,\s*\n\s*#fullscreen\s*{/);
+  // Connect to TV joins the themed drawer-action group (green outline,
+  // 48px). The group's selector list ends at `#fullscreen {`; zero or
+  // more sibling ids may appear between #mobile-connect-tv and
+  // #fullscreen so this test stays correct as new drawer-action
+  // buttons (e.g. #mobile-privacy) are added to the group.
+  assert.match(
+    css,
+    /#mobile-connect-tv,(\s*\n\s*#[A-Za-z][\w-]*,)*\s*\n\s*#fullscreen\s*\{/
+  );
 });

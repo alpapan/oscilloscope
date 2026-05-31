@@ -166,6 +166,22 @@
         if (typeof window.connectToTv === "function") window.connectToTv();
       });
     }
+    // Privacy-policy overlay toggle. Same-page overlay (no navigation),
+    // so the AudioWorklet keeps running while the user reads the policy.
+    const privacyBtn = document.getElementById("mobile-privacy");
+    const privacyOverlay = document.getElementById("privacy-overlay");
+    const privacyCloseBtn = document.getElementById("privacy-close");
+    if (privacyBtn && privacyOverlay) {
+      privacyBtn.addEventListener("click", () => {
+        privacyOverlay.classList.remove("hidden");
+        closeDrawer();
+      });
+    }
+    if (privacyCloseBtn && privacyOverlay) {
+      privacyCloseBtn.addEventListener("click", () => {
+        privacyOverlay.classList.add("hidden");
+      });
+    }
     const exitBtn = document.getElementById("mobile-exit");
     if (exitBtn) {
       exitBtn.addEventListener("click", () => {

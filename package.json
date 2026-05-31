@@ -18,6 +18,7 @@
     "sync": "cap sync android",
     "prebuild:android": "npm run sync-www",
     "build:android": "cap sync android && cd android && ./gradlew :app:assembleRelease",
+    "build:android:aab": "npm run sync-www && cap sync android && cd android && ./gradlew :app:bundleRelease",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
@@ -87,7 +88,9 @@
   "dependencies": {
     "@capacitor/android": "^8.3.4",
     "@capacitor/app": "^8.1.0",
-    "@capacitor/core": "^8.3.4"
+    "@capacitor/core": "^8.3.4",
+    "pixi-filters": "^6.1.5",
+    "pixi.js": "^8.18.1"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.3.4",

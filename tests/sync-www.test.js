@@ -19,9 +19,12 @@ const INDEX_HTML = path.join(ROOT, "index.html");
 function parseSyncList() {
   const text = fs.readFileSync(SYNC_SH, "utf8");
   const start = text.indexOf("for f in");
-  const end = text.indexOf("do", start);
-  assert.ok(start >= 0 && end > start, "could not locate sync-www.sh for loop");
-  const block = text.slice(start, end);
+  // Find the next standalone `do` token (whitespace-bounded) so we don't
+  // match the `do` substring inside "vendor/..." path components.
+  const tail = text.slice(start);
+  const m = tail.match(/\sdo\s/);
+  assert.ok(start >= 0 && m, "could not locate sync-www.sh for loop");
+  const block = tail.slice(0, m.index);
   return block
     .split(/\s+/)
     .filter(tok => /\.[A-Za-z0-9]+$/.test(tok))

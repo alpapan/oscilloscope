@@ -421,6 +421,7 @@ body.drawer-open #mobile-drawer { transform: translateX(0); }
 #eq-reset,
 #mobile-fullscreen,
 #mobile-connect-tv,
+#mobile-privacy,
 #fullscreen {
   align-self: flex-start;
   margin-top: 4px;
@@ -440,6 +441,7 @@ body.drawer-open #mobile-drawer { transform: translateX(0); }
 #eq-reset:active,
 #mobile-fullscreen:active,
 #mobile-connect-tv:active,
+#mobile-privacy:active,
 #fullscreen:active { opacity: 0.6; }
 
 #mobile-fullscreen[hidden],
@@ -569,3 +571,54 @@ body.tv #tv-version {
    sense before any audio is captured (live-signal tuning is hidden). */
 body.pre-capture #mobile-drawer > section:not(.pc-keep) { display: none; }
 body.pre-capture #mobile-stop { display: none; }
+
+/* Privacy-policy same-page overlay. Toggled by mobile-ui.js via the
+   .hidden class so the AudioWorklet is not torn down by a navigation. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg, #000);
+  color: var(--fg, #33ff66);
+  z-index: 1000;
+  overflow-y: auto;
+  /* Notched / gesture-bar devices: pad by the system inset so the
+     close button stays reachable below the bottom gesture area and
+     the heading stays clear of the top notch. */
+  padding-top: max(16px, env(safe-area-inset-top));
+  padding-right: max(16px, env(safe-area-inset-right));
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  padding-left: max(16px, env(safe-area-inset-left));
+  -webkit-overflow-scrolling: touch;
+}
+.overlay.hidden { display: none; }
+.overlay-card {
+  max-width: 720px;
+  margin: 0 auto;
+  background: var(--bg, #000);
+  color: var(--fg, #33ff66);
+  padding: 0;
+}
+.overlay-card h1 {
+  color: var(--fg, #33ff66);
+  margin-top: 0;
+}
+.overlay-card h2 {
+  color: var(--fg, #33ff66);
+  margin-top: 1.2em;
+  font-size: 1.1em;
+}
+.overlay-card p, .overlay-card li {
+  color: var(--fg, #33ff66);
+  line-height: 1.5;
+}
+.overlay-close {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  margin-top: 24px;
+  background: var(--bg, #000);
+  color: var(--fg, #33ff66);
+  border: 1px solid var(--fg, #33ff66);
+  font-size: 16px;
+  cursor: pointer;
+}

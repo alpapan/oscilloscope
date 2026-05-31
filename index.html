@@ -11,8 +11,12 @@
   <meta name="theme-color" content="#33ff66">
   <link rel="stylesheet" href="style.css">
   <!-- pixi.js v8 UMD bundle: sets window.PIXI. Must run BEFORE the
-       importmap + module-script below so pixi-shim.js can find it. -->
-  <script src="https://cdn.jsdelivr.net/npm/pixi.js@8/dist/pixi.min.js"></script>
+       importmap + module-script below so pixi-shim.js can find it.
+       Vendored locally under vendor/ (copied from
+       node_modules/pixi.js/dist by `npm install`) so the app makes no
+       outbound internet connection at startup; this keeps the privacy
+       policy's "no outbound internet" claim accurate. -->
+  <script src="vendor/pixi.min.js"></script>
   <script type="importmap">
     {
       "imports": {
@@ -93,6 +97,44 @@
   <div id="tv-pair-overlay" hidden></div>
   <div id="tv-version"></div>
 
+  <!-- Privacy-policy overlay. Toggled by mobile-ui.js when the user taps
+       Settings -> Privacy policy. Same-page overlay (NOT a navigation):
+       the AudioWorklet keeps running so the visualisation is not lost.
+       Content is static text; no fetches, no scripts, no external assets,
+       so the screen renders correctly during Play Console offline review.
+       Kept in lockstep with docs/privacy-policy.md. -->
+  <div id="privacy-overlay" class="overlay hidden" role="dialog"
+       aria-labelledby="privacy-title" aria-modal="true">
+    <div class="overlay-card">
+      <h1 id="privacy-title">Privacy policy</h1>
+      <p><strong>Effective date:</strong> 2026-05-31</p>
+      <h2>Developer</h2>
+      <p>Scope is published by Alexie Papanicolaou. For questions about this privacy policy or the app's data handling, contact greenbluekats@gmail.com.</p>
+      <h2>Summary</h2>
+      <p>Scope is a music oscilloscope. It captures audio from your device and renders it as a real-time visualisation on screen. No audio, no settings, no identifiers, and no other personal data are transmitted off your device. Everything happens inside the app on the device you installed it on.</p>
+      <h2>Data we collect and access</h2>
+      <p>Audio - captured live via either the Android MediaProjection API (the operating system's system-audio loopback path), or the device microphone. The audio stream is fed directly into the visualisation pipeline and is not recorded to disk, not transmitted off the device, and not analysed for any purpose other than producing the on-screen waveform / spectrum / Lissajous rendering.</p>
+      <p>App settings - your theme, sensitivity, smoothing, FFT detail, and microphone preference are stored in the WebView's local storage on the device. They may be included in Android's standard auto-backup if you have Google Drive backup enabled, so your preferences carry between reinstalls. The app itself never transmits these settings anywhere.</p>
+      <h2>Microphone</h2>
+      <p>The microphone is used only as a fallback for audio sources that the Android MediaProjection system cannot capture (for example, apps such as Spotify that mark their audio output with FLAG_NO_MEDIA_PROJECTION). When microphone capture is active, the audio stream from the microphone is fed into the same on-device visualisation pipeline as system audio. The microphone stream is not recorded, not transmitted, and not retained.</p>
+      <p>Microphone access requires an explicit grant of Android's standard RECORD_AUDIO runtime permission. You can revoke this permission at any time in your device's app settings; the app will fall back to system-audio capture when it loses the permission.</p>
+      <h2>Permissions and why we ask for them</h2>
+      <ul>
+        <li><strong>RECORD_AUDIO</strong> - for the microphone fallback path.</li>
+        <li><strong>FOREGROUND_SERVICE / FOREGROUND_SERVICE_MEDIA_PROJECTION / FOREGROUND_SERVICE_MICROPHONE</strong> - required by Android 14+ to run the capture service while the app is in the background (e.g. picture-in-picture mode).</li>
+        <li><strong>POST_NOTIFICATIONS</strong> - required by Android 13+ so the foreground service can show its mandatory ongoing notification.</li>
+        <li><strong>INTERNET</strong> + <strong>CHANGE_WIFI_MULTICAST_STATE</strong> - used only for the optional local-network feature that pairs the Scope phone app with a Scope Android TV app on the same Wi-Fi (Network Service Discovery and a direct local TCP socket). The app does not make outbound internet connections; all network traffic is restricted to your local network.</li>
+      </ul>
+      <h2>Third parties</h2>
+      <p>Scope does not include any third-party advertising, analytics, crash reporting, or tracking SDKs. No data is shared with any third party.</p>
+      <h2>Children</h2>
+      <p>Scope is not directed at children. The app handles no personal data and is content-rated Everyone; nevertheless we do not market the app to children or knowingly collect data from children under 13.</p>
+      <h2>Changes to this policy</h2>
+      <p>This policy is versioned by Git commit on the project's public source repository. Each substantive revision produces a new commit on the main branch; the URL referenced from the Play Store listing is pinned to the specific commit revision in force at the time of the listing update.</p>
+      <button type="button" id="privacy-close" class="overlay-close">Close</button>
+    </div>
+  </div>
+
   <div id="mobile-backdrop" hidden></div>
   <aside id="mobile-drawer" hidden>
     <header class="drawer-header">
@@ -144,19 +186,20 @@
     </section>
     <button id="mobile-fullscreen" type="button" class="drawer-action" hidden>Fullscreen</button>
     <button id="mobile-connect-tv" type="button" class="drawer-action">Connect to TV</button>
+    <button id="mobile-privacy" type="button" class="drawer-action">Privacy policy</button>
     <button id="mobile-stop" type="button" class="stop">Stop capture</button>
     <button id="mobile-exit" type="button" class="stop">Exit app</button>
     <p id="mobile-version"></p>
   </aside>
   <script type="module">
-    // pixi-filters@6 ships no UMD/IIFE browser bundle, so it loads via
-    // ESM from esm.sh. The `?external=pixi.js` parameter tells esm.sh to
-    // import pixi.js as a bare specifier (`from "pixi.js"`), which the
-    // importmap above resolves to ./pixi-shim.js -- the shim re-exports
-    // the UMD pixi.js loaded by the classic <script> tag at the top.
-    // Net effect: a single PIXI instance shared by both our code and
-    // pixi-filters' filter classes.
-    import { GlowFilter, BloomFilter, CRTFilter } from 'https://esm.sh/pixi-filters@6?external=pixi.js';
+    // pixi-filters@6 ships an ESM bundle (dist/pixi-filters.mjs) that
+    // imports "pixi.js" as a bare specifier. The importmap above
+    // resolves that to ./pixi-shim.js, which re-exports the UMD pixi.js
+    // loaded by the classic <script> tag at the top. Net effect: a
+    // single PIXI instance shared by both our code and pixi-filters'
+    // filter classes. Vendored locally under vendor/ so the app makes
+    // no outbound internet connection at startup.
+    import { GlowFilter, BloomFilter, CRTFilter } from './vendor/pixi-filters.mjs';
     window.PIXI.filters = { GlowFilter, BloomFilter, CRTFilter };
     const s = document.createElement('script');
     s.src = 'main.js';
