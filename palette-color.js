@@ -83,6 +83,9 @@ function oklchToRgbInt(L, C, h) {
 // stops is monochrome: the LUT is left null and colorAt returns fg.
 function bakeRamp(palette, hueOffsetDeg = 0) {
   const ramp = palette.ramp || [];
+  // The tempo-driven hue offset rotates only palettes that opt in via tempoHue;
+  // fixed palettes keep their designed hues regardless of tempo.
+  const offset = palette.tempoHue ? hueOffsetDeg : 0;
   if (ramp.length < 2) { palette._lut = null; return; }
   const lut = new Uint32Array(256);
   const segs = ramp.length - 1;
@@ -97,7 +100,7 @@ function bakeRamp(palette, hueOffsetDeg = 0) {
     const dh = ((b.h - a.h + 540) % 360) - 180;
     const L = a.L + (b.L - a.L) * u;
     const C = a.C + (b.C - a.C) * u;
-    const h = a.h + dh * u + hueOffsetDeg;
+    const h = a.h + dh * u + offset;
     lut[j] = oklchToRgbInt(L, C, h);
   }
   palette._lut = lut;

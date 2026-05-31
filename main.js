@@ -279,6 +279,13 @@ const themes = {
             { L: 0.50, C: 0.22, h: 30 }, { L: 0.65, C: 0.22, h: 55 },
             { L: 0.80, C: 0.20, h: 80 }, { L: 0.92, C: 0.14, h: 95 },
             { L: 0.98, C: 0.02, h: 95 } ] },
+  // tempoHue: tempo rotates this palette's single vivid hue through the wheel
+  // (bpmToHueDeg). The fixed palettes above keep their designed hues.
+  chroma: { fg: 0xff2db8, fgCss: "#ff2db8", decayAlpha: 1.0, lineWidth: 2.0, filters: [], tempoHue: true,
+          hueCycleRadians: 0, hueShiftOnBeat: 0, ramp: [
+            { L: 0.22, C: 0.16, h: 330 }, { L: 0.42, C: 0.24, h: 330 },
+            { L: 0.62, C: 0.26, h: 330 }, { L: 0.80, C: 0.20, h: 330 },
+            { L: 0.95, C: 0.07, h: 330 } ] },
 };
 const THICK_OFFSETS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
 // Filters are populated inside init() once PIXI globals are available
@@ -943,7 +950,7 @@ async function startTvMode() {
     if (payload && payload.type === "mirror-state") {   // forward-compat: unknown types ignored
       const { view, theme } = payload;
       state.view = view === 1 ? "spectrum" : view === 2 ? "lissajous" : view === 3 ? "cosmos" : view === 4 ? "grove" : view === 5 ? "firebird" : "waveform";
-      if (["crt", "neon", "mono", "nebula", "verdant", "ember"].includes(theme)) state.theme = theme;
+      if (["crt", "neon", "mono", "nebula", "verdant", "ember", "chroma"].includes(theme)) state.theme = theme;
       applyState();
     }
   });
@@ -1907,7 +1914,7 @@ async function init() {
       if (e.key === "5") { state.view = "grove";    applyState(); }
       if (e.key === "6") { state.view = "firebird"; applyState(); }
       if (e.key === "t" || e.key === "T") {
-        const order = ["crt", "neon", "mono", "nebula", "verdant", "ember"];
+        const order = ["crt", "neon", "mono", "nebula", "verdant", "ember", "chroma"];
         const idx = order.indexOf(state.theme);
         state.theme = order[(idx + 1) % order.length];
         applyState();

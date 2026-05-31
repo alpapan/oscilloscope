@@ -57,14 +57,14 @@ test("startTvMode registers a tvRenderRequest listener that handles mirror-state
   const js = read("main.js");
   // The listener must update state.view + state.theme on mirror-state and call applyState.
   // Bounds widened 200 -> 400 between view/theme/applyState: the 6-view numeric
-  // decode and 6-palette whitelist made the correct code longer than the old
+  // decode and 7-palette whitelist made the correct code longer than the old
   // tight window (same rationale as the wireTvRemote bound widening below).
   assert.match(js, /addListener\("tvRenderRequest"[\s\S]{0,800}?type\s*===\s*["']mirror-state["'][\s\S]{0,400}?state\.view\s*=[\s\S]{0,400}?state\.theme\s*=[\s\S]{0,400}?applyState\(\)/);
 });
 
 test("tvRenderRequest listener validates theme against known palette set", () => {
   const js = read("main.js");
-  assert.match(js, /\["crt",\s*"neon",\s*"mono",\s*"nebula",\s*"verdant",\s*"ember"\]\.includes/);
+  assert.match(js, /\["crt",\s*"neon",\s*"mono",\s*"nebula",\s*"verdant",\s*"ember",\s*"chroma"\]\.includes/);
 });
 
 test("tvRenderRequest listener maps numeric view back to string for state.view", () => {

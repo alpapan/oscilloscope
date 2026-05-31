@@ -28,9 +28,15 @@ test("bakeRamp multi-stop: colorAt endpoints differ in luminance, mid between", 
   assert.ok(sum(mid) > sum(lo) && sum(mid) < sum(hi), "mid between ends");
 });
 
-test("bakeRamp hueOffsetDeg rotates every stop's hue", () => {
+test("bakeRamp applies hueOffsetDeg only to tempoHue palettes", () => {
   const stops = [{ L: 0.6, C: 0.2, h: 30 }, { L: 0.6, C: 0.2, h: 30 }];
-  const a = { fg: 0, ramp: stops.map(s => ({ ...s })) }; bakeRamp(a, 0);
-  const b = { fg: 0, ramp: stops.map(s => ({ ...s })) }; bakeRamp(b, 120);
-  assert.notStrictEqual(colorAt(a, 0.5), colorAt(b, 0.5), "hue offset must change colour");
+  // A fixed palette (no tempoHue) must ignore the tempo hue offset so it keeps
+  // its designed colours regardless of tempo.
+  const fixed0   = { fg: 0, ramp: stops.map(s => ({ ...s })) }; bakeRamp(fixed0, 0);
+  const fixed120 = { fg: 0, ramp: stops.map(s => ({ ...s })) }; bakeRamp(fixed120, 120);
+  assert.strictEqual(colorAt(fixed0, 0.5), colorAt(fixed120, 0.5), "fixed palette ignores tempo hue offset");
+  // A tempoHue palette rotates every stop by the offset.
+  const rot0   = { fg: 0, tempoHue: true, ramp: stops.map(s => ({ ...s })) }; bakeRamp(rot0, 0);
+  const rot120 = { fg: 0, tempoHue: true, ramp: stops.map(s => ({ ...s })) }; bakeRamp(rot120, 120);
+  assert.notStrictEqual(colorAt(rot0, 0.5), colorAt(rot120, 0.5), "tempoHue palette rotates with offset");
 });
