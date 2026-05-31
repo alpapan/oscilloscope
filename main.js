@@ -127,6 +127,7 @@ const state = {
   // a Capacitor WebView. The native bridge call below does the actual hide.
   androidImmersive: false,
   tvMode: false,          // ON when running as the leanback TV receiver
+  paired: false,          // ON when this device is the partner of a paired TV/phone
 };
 function setRunning(val) {
   state.running = !!val;
@@ -843,8 +844,25 @@ function hidePairOverlay() {
 function wireTvRemote() {
   if (typeof document === "undefined") return;
   document.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowRight" || e.key === "Enter") window.MobileUI?.cycleView(+1, state, applyState);
-    else if (e.key === "ArrowLeft") window.MobileUI?.cycleView(-1, state, applyState);
+    const dispatch = (direction) => {
+      if (state.paired) {
+        // Round-trip via phone: compute the new view locally (without mutating
+        // state.view) and ask the phone to apply. The phone will mirror back
+        // and our tvRenderRequest listener (above) will then set state.view.
+        const order = ["waveform", "spectrum", "lissajous"];
+        const idx = order.indexOf(state.view);
+        const next = order[(idx + direction + order.length) % order.length];
+        const v = next === "spectrum" ? 1 : next === "lissajous" ? 2 : 0;
+        window.Capacitor?.Plugins?.ScopeAudio?.sendRenderRequest({
+          type: "remote-view-request", view: v,
+        });
+      } else {
+        // Standalone TV mode (no phone paired): preserve the current cycle behaviour.
+        window.MobileUI?.cycleView(direction, state, applyState);
+      }
+    };
+    if (e.key === "ArrowRight" || e.key === "Enter") dispatch(+1);
+    else if (e.key === "ArrowLeft") dispatch(-1);
   });
 }
 
@@ -862,10 +880,30 @@ async function startTvMode() {
     try { tvFrame = window.decodeAnalysisFrame(base64ToArrayBuffer(e.data)); } catch (_e) { /* drop bad frame */ }
   });
   await plugin.addListener("tvPairCode", e => { tvPairCode = e.code; showPairOverlay(e.code); });
-  await plugin.addListener("tvConnected", () => { hidePairOverlay(); sendTvRenderRequest(); });
+  await plugin.addListener("tvConnected", () => {
+    hidePairOverlay();
+    sendTvRenderRequest();
+    state.paired = true;
+  });
   // On disconnect the code is still valid and the TV re-advertises, so keep it
   // on screen (with a hint) rather than hiding it - a returning phone needs it.
-  await plugin.addListener("tvDisconnected", () => showPairOverlay(tvPairCode || "Waiting for phone..."));
+  await plugin.addListener("tvDisconnected", () => {
+    showPairOverlay(tvPairCode || "Waiting for phone...");
+    state.paired = false;
+  });
+  // TV-side: phone-pushed mirror state. Update state.view + state.theme then
+  // re-render via applyState (which also re-issues a render-request back to
+  // the phone so the phone computes the right analysis for the new view).
+  await plugin.addListener("tvRenderRequest", (e) => {
+    let payload;
+    try { payload = JSON.parse(e.json); } catch (_err) { return; }
+    if (payload && payload.type === "mirror-state") {   // forward-compat: unknown types ignored
+      const { view, theme } = payload;
+      state.view = view === 1 ? "spectrum" : view === 2 ? "lissajous" : "waveform";
+      if (["crt", "neon", "mono"].includes(theme)) state.theme = theme;
+      applyState();
+    }
+  });
   wireTvRemote();
   const res = await plugin.startTvReceiver();
   tvPairCode = res.code;
@@ -879,7 +917,7 @@ async function startTvMode() {
 function sendTvRenderRequest() {
   const v = state.view === "spectrum" ? 1 : state.view === "lissajous" ? 2 : 0;
   window.Capacitor?.Plugins?.ScopeAudio?.sendRenderRequest({
-    type: "render-request", view: v, waveformPoints: state.fftSize, fftBins: state.fftSize >> 1, channels: v === 2 ? 2 : 1,
+    type: "render-request", view: v, waveformPoints: state.fftSize, fftBins: state.fftSize >> 1, channels: v === 2 ? 2 : 1, fftSize: state.fftSize,
   });
 }
 
@@ -979,12 +1017,38 @@ async function connectToTv() {
   await plugin.addListener("tvFound", e => {
     if (!found.some(t => t.host === e.host && t.port === e.port)) { found.push(e); renderTvList(found); }
   });
-  await plugin.addListener("tvConnected", () => window.MobileUI?.showToast("Streaming to TV"));
-  await plugin.addListener("tvDisconnected", () => window.MobileUI?.showToast("TV disconnected"));
+  await plugin.addListener("tvConnected", () => {
+    window.MobileUI?.showToast("Streaming to TV");
+    state.paired = true;
+    sendPhoneMirror();   // initial sync: TV picks up the phone's current view + theme immediately
+  });
+  await plugin.addListener("tvDisconnected", () => {
+    window.MobileUI?.showToast("TV disconnected");
+    state.paired = false;
+  });
+  // Phone-side: TV remote D-pad arrived (round-trip-via-phone). Update view
+  // locally and re-render; applyState's mirror gating will then push the
+  // resolved view back to the TV.
+  await plugin.addListener("phoneViewRequest", (e) => {
+    const view = e?.view;
+    if (![0, 1, 2].includes(view)) return;
+    state.view = view === 1 ? "spectrum" : view === 2 ? "lissajous" : "waveform";
+    applyState();
+  });
   renderTvList(found);
   await plugin.discoverTvs();
 }
 if (typeof window !== "undefined") window.connectToTv = connectToTv;
+
+// Phone-side: push the current view + theme to the paired TV so the TV mirrors
+// the phone's visual state. No-op when not paired - the JS-side state.paired
+// gates the call (the Kotlin side also no-ops when the socket is not connected).
+function sendPhoneMirror() {
+  const v = state.view === "spectrum" ? 1 : state.view === "lissajous" ? 2 : 0;
+  window.Capacitor?.Plugins?.ScopeAudio?.sendPhoneMirror({
+    type: "mirror-state", view: v, theme: state.theme,
+  });
+}
 
 function applyState() {
   // When Auto-gain is ON, the per-frame envelope follower writes gain
@@ -1003,6 +1067,8 @@ function applyState() {
     audio.analyserR.frequencyBinCount = state.fftSize >> 1;
     sendTvRenderRequest();   // tell the phone what the new view needs
   }
+  // Phone-side mirror: when paired and NOT the TV, push view + theme to TV.
+  if (!state.tvMode && state.paired) sendPhoneMirror();
   if (audio.eqAnalyserL && audio.eqAnalyserR) {
     audio.eqAnalyserL.fftSize = state.fftSize;
     audio.eqAnalyserR.fftSize = state.fftSize;
@@ -1448,6 +1514,7 @@ async function init() {
       document.getElementById("mobile-capture-mic").onclick = () => { state.micMode = captureSourceMicMode("mic"); startCapture(); };
       document.getElementById("mobile-stop").onclick = stopCapture;
       MobileUI.wireDrawer(state, applyState);
+      window.Capacitor?.Plugins?.ScopeAudio?.setSmoothingAlpha?.({value: state.smoothing});   // initial sync of slider value into phone-side prep pipeline
       MobileUI.wireGestures(document.getElementById("stage"), state, applyState);
       // The PiP RemoteAction calls window.cycleView(1) via the Capacitor bridge.
       window.cycleView = function (direction) {
@@ -1499,11 +1566,12 @@ async function init() {
       applyState();
     });
     document.getElementById("fft").addEventListener("change", (e) => {
-      state.fftSize = parseInt(e.target.value, 10);
+      state.fftSize = Math.min(parseInt(e.target.value, 10), 16384);
       applyState();
     });
     document.getElementById("smooth").addEventListener("input", (e) => {
       state.smoothing = parseFloat(e.target.value);
+      window.Capacitor?.Plugins?.ScopeAudio?.setSmoothingAlpha?.({value: state.smoothing});
       applyState();
     });
     const autoEl = document.getElementById("autogain");

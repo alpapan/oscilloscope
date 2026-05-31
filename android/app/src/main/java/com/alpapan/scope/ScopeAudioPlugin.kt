@@ -26,8 +26,19 @@ import com.getcapacitor.annotation.Permission
 import com.getcapacitor.annotation.PermissionCallback
 import org.json.JSONObject
 import kotlin.math.log10
+import com.alpapan.scope.tv.ControlRouter
+import com.alpapan.scope.tv.PhoneInboundAction
+import com.alpapan.scope.tv.SlidingWindow
+import com.alpapan.scope.tv.WaveformPrep
 
-data class RenderSpec(val view: Int, val waveformPoints: Int, val fftBins: Int, val channels: Int)
+const val MAX_FFT_SIZE = 16384
+const val WIRE_DOWNSAMPLE_FACTOR: Float = 1f   // ratio output/input; 1f = no downsample (TV waveform equals phone waveform)
+
+object RenderSpecClamp {
+    fun clampFftSize(raw: Int): Int = raw.coerceAtMost(MAX_FFT_SIZE).coerceAtLeast(64)
+}
+
+data class RenderSpec(val view: Int, val waveformPoints: Int, val fftBins: Int, val channels: Int, val fftSize: Int = 2048)
 
 @CapacitorPlugin(
     name = "ScopeAudio",
@@ -51,10 +62,21 @@ class ScopeAudioPlugin : Plugin() {
     private var browser: com.alpapan.scope.tv.TvBrowser? = null
     private val sender = com.alpapan.scope.tv.PhoneSenderClient { notifyTvDisconnected() }
     @Volatile private var spec = RenderSpec(0, 512, 256, 2)
+    private val windowL = SlidingWindow(MAX_FFT_SIZE)
+    private val windowR = SlidingWindow(MAX_FFT_SIZE)
+    private val smoothScratchL = FloatArray(MAX_FFT_SIZE)
+    private val smoothScratchR = FloatArray(MAX_FFT_SIZE)
+    @Volatile private var smoothingAlpha: Float = 0f
 
     override fun load() {
         instance = this
-        sender.onControl = { json -> applyRequest(json) }
+        sender.onControl = { json ->
+            when (val a = ControlRouter.route(json)) {
+                is PhoneInboundAction.ApplyRequest -> applyRequest(a.json)
+                is PhoneInboundAction.ForwardViewRequest -> notifyPhoneViewRequest(a.view)
+                PhoneInboundAction.Drop -> android.util.Log.w("ScopeCtl", "dropped inbound control: $json")
+            }
+        }
     }
 
     @PluginMethod
@@ -299,6 +321,24 @@ class ScopeAudioPlugin : Plugin() {
         call.resolve()
     }
 
+    /** Phone: push the current view + theme to the paired TV so the TV mirrors
+     *  the phone's visual state. JSON shape: {type:"mirror-state", view, theme}.
+     *  No-op at the wire level when not connected (PhoneSenderClient.enqueue
+     *  silently drops when !connected). */
+    @PluginMethod
+    fun sendPhoneMirror(call: PluginCall) {
+        sender.sendControl(call.data.toString())
+        call.resolve()
+    }
+
+    /** Phone: set the EMA smoothing alpha used by the phone-side WaveformPrep
+     *  pipeline (mirrors the JS state.smoothing slider into native). */
+    @PluginMethod
+    fun setSmoothingAlpha(call: PluginCall) {
+        smoothingAlpha = call.getFloat("value") ?: 0f
+        call.resolve()
+    }
+
     /** TV: start the receiver service and return the pairing code to show. */
     @PluginMethod
     fun startTvReceiver(call: PluginCall) {
@@ -326,28 +366,75 @@ class ScopeAudioPlugin : Plugin() {
         applyRequest(json)
         notifyListeners("tvRenderRequest", JSObject().put("json", json))
     }
+    /** Phone-side: forwards a TV remote D-pad press from the paired TV up to JS
+     *  so JS can update state.view and re-mirror back to the TV (single source
+     *  of truth on the phone). */
+    fun notifyPhoneViewRequest(view: Int) {
+        notifyListeners("phoneViewRequest", JSObject().put("view", view))
+    }
     fun notifyTvAnalysisFrame(b64: String) = notifyListeners("tvAnalysisFrame", JSObject().put("data", b64))
 
     private fun applyRequest(json: String) {
         try {
             val o = JSONObject(json)
-            spec = RenderSpec(o.optInt("view", 0), o.optInt("waveformPoints", 512), o.optInt("fftBins", 256), o.optInt("channels", 2))
+            spec = RenderSpec(
+                o.optInt("view", 0),
+                o.optInt("waveformPoints", 512),
+                o.optInt("fftBins", 256),
+                o.optInt("channels", 2),
+                RenderSpecClamp.clampFftSize(o.optInt("fftSize", 2048)),
+            )
         } catch (_: Throwable) {}
     }
 
-    /** Capture-thread callback: serialise only the arrays the current spec names,
-     *  then hand to the sender's bounded queue (never blocks the capture reader). */
+    /** Apply WIRE_DOWNSAMPLE_FACTOR (ratio output/input). factor >= 1f means
+     *  no downsample - wire carries the full prepped buffer (TV waveform
+     *  equals phone waveform). factor < 1f reduces wire bandwidth by that
+     *  ratio at the cost of TV waveform detail. */
+    private fun downsampleForWireIfConfigured(buf: FloatArray): FloatArray {
+        if (WIRE_DOWNSAMPLE_FACTOR >= 1f) return buf
+        val target = (buf.size * WIRE_DOWNSAMPLE_FACTOR).toInt().coerceAtLeast(1)
+        return com.alpapan.scope.tv.Dsp.downsample(buf, target)
+    }
+
+    /** Capture-thread callback: pushes raw PCM into the sliding window, reads
+     *  the latest spec.fftSize samples, runs view-specific prep (smoothing +
+     *  optional trigger for waveform), optionally downsamples for the wire,
+     *  then hands to the sender's bounded queue. */
     private fun makePcmTap(): (FloatArray, FloatArray?) -> Unit = { left, right ->
         val s = spec
-        val frame = if (s.view == 1) {                                   // spectrum: mono mix -> FFT dB
-            val mono = FloatArray(left.size) { (left[it] + (right?.getOrElse(it) { left[it] } ?: left[it])) * 0.5f }
-            val mags = com.alpapan.scope.tv.Dsp.downsample(com.alpapan.scope.tv.Fft.magnitudes(mono), s.fftBins)
-            val db = FloatArray(mags.size) { 20f * log10((mags[it] + 1e-9f)) }
-            com.alpapan.scope.tv.AnalysisFrameCodec.encodeSpectrum(s.view, db)
-        } else {                                                          // waveform / lissajous
-            val l = com.alpapan.scope.tv.Dsp.downsample(left, s.waveformPoints)
-            val r = if (s.channels == 2 && right != null) com.alpapan.scope.tv.Dsp.downsample(right, s.waveformPoints) else null
-            com.alpapan.scope.tv.AnalysisFrameCodec.encodeWaveform(s.view, l, r)
+        windowL.push(left)
+        if (right != null) windowR.push(right)
+        val winL = windowL.last(s.fftSize)
+        val winR = if (s.channels == 2 && right != null) windowR.last(s.fftSize) else null
+        val frame = when (s.view) {
+            1 -> {                                                              // spectrum: mono mix -> FFT dB on the window
+                val mono = FloatArray(winL.size) {
+                    (winL[it] + (winR?.getOrElse(it) { winL[it] } ?: winL[it])) * 0.5f
+                }
+                val mags = com.alpapan.scope.tv.Dsp.downsample(com.alpapan.scope.tv.Fft.magnitudes(mono), s.fftBins)
+                val db = FloatArray(mags.size) { 20f * log10((mags[it] + 1e-9f)) }
+                com.alpapan.scope.tv.AnalysisFrameCodec.encodeSpectrum(s.view, db)
+            }
+            2 -> {                                                              // lissajous: pcmSmooth + smoothBuf on both channels
+                val sL = WaveformPrep.pcmSmooth(winL, smoothScratchL)
+                val emaL = WaveformPrep.smoothBuf("L", sL, smoothingAlpha)
+                val dL = downsampleForWireIfConfigured(emaL)
+                val dR = if (winR != null) {
+                    val sR = WaveformPrep.pcmSmooth(winR, smoothScratchR)
+                    val emaR = WaveformPrep.smoothBuf("R", sR, smoothingAlpha)
+                    downsampleForWireIfConfigured(emaR)
+                } else null
+                com.alpapan.scope.tv.AnalysisFrameCodec.encodeWaveform(s.view, dL, dR)
+            }
+            else -> {                                                           // waveform (view==0): smooth + trigger + trim + downsample
+                val sL = WaveformPrep.pcmSmooth(winL, smoothScratchL)
+                val emaL = WaveformPrep.smoothBuf("L", sL, smoothingAlpha)
+                val start = WaveformPrep.findZeroCrossing(emaL)
+                val trimmed = if (start == 0) emaL else emaL.copyOfRange(start, emaL.size)
+                val dL = downsampleForWireIfConfigured(trimmed)
+                com.alpapan.scope.tv.AnalysisFrameCodec.encodeWaveform(s.view, dL, null)
+            }
         }
         sender.enqueue(frame)
     }
