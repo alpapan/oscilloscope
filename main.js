@@ -13,6 +13,7 @@
  * @property {number} longAverage
  * @property {number} rms
  * @property {number} rmsLongAverage
+ * @property {number} bpm
  */
 
 // =============================================================================
@@ -134,7 +135,7 @@ const state = {
   micModeAuto: false,     // ON: auto-switch to mic when projection capture is silently filtered, no prompt
   audioAnalysis: null,    // createAudioAnalysis instance, set after analysers up
   /** @type {AudioState} */
-  audio: { bass: 0, mid: 0, treb: 0, bassAtt: 0, beat: false, beatPulse: 0, longAverage: 0, rms: 0, rmsLongAverage: 0 },
+  audio: { bass: 0, mid: 0, treb: 0, bassAtt: 0, beat: false, beatPulse: 0, longAverage: 0, rms: 0, rmsLongAverage: 0, bpm: 0 },
   screenLock: null,       // WakeLockSentinel; set by requestScreenLock
   // Android-only: track the immersive (system-bars-hidden) state ourselves
   // since the standard Fullscreen API does not hide the status/nav bars on
@@ -1263,10 +1264,9 @@ function frameBody() {
     audio.eqAnalyserL || audio.analyserL,
     audio.eqAnalyserR || audio.analyserR,
     theme, w, h);
-  if (state.view === "cosmos") drawCosmos(pixi.current, audio.eqAnalyserL || audio.analyserL, theme, w, h);
+  if (state.view === "cosmos") drawCosmos(pixi.current, theme, w, h);
   if (state.view === "grove") drawGrove(pixi.current, audio.eqAnalyserL || audio.analyserL, theme, w, h);
-  if (state.view === "firebird") drawFirebird(pixi.current,
-    audio.eqAnalyserL || audio.analyserL, audio.eqAnalyserR || audio.analyserR, theme, w, h);
+  if (state.view === "firebird") drawFirebird(pixi.current, theme, w, h);
 
   // Step 3: bake current onto the trail texture.
   pixi.app.renderer.render(pixi.current, { renderTexture: pixi.trail, clear: false });
@@ -1423,53 +1423,82 @@ function drawLissajous(g, analyserL, analyserR, theme, w, h) {
   strokeMultiOffset(g, points, theme, w, h, now, state.audio.beatPulse || 0);
 }
 
-const cosmos = { rings: [], lastT: 0 };
+const cosmos = { rings: [], lastT: 0, sinceSpawn: 0 };
 
-function drawCosmos(g, analyser, theme, w, h) {
-  if (!analyser) return;
-  const raw = new Float32Array(analyser.fftSize);
-  analyser.getFloatTimeDomainData(raw);
+// Tempo-driven concentric rings: one ring is born per beat-period (from the
+// avgBpm tracker), expands to a screen-fitting radius over ~2 beats, then
+// fades at the rim. No waveform wrapping - that read as chaos; the rhythm
+// follows the music's tempo instead. A subtle bass pulse adds life; a ring
+// born on a detected beat is drawn brighter/thicker as an accent.
+function drawCosmos(g, theme, w, h) {
   const now = performance.now() / 1000;
   const dt = cosmos.lastT ? Math.min(0.05, now - cosmos.lastT) : 0.016;
   cosmos.lastT = now;
 
   const a = state.audio || {};
-  const speed = 0.15 + (a.bassAtt || 0) * 0.6;
-  const fov = Math.min(w, h) * (0.18 + (a.mid || 0) * 0.04);
+  const bp = a.beatPulse || 0;                            // 0..1, spikes per beat
+  const att = Math.max(0, (a.bassAtt || 1) - 1);          // excess bass, 0 baseline
+  const bpm = state.tempo ? state.tempo.avgBpm() : 120;   // clamped 40..200
+  const beatPeriod = 60 / bpm;
+  const speed = (1 / (2.2 * beatPeriod)) * (1 + att * 0.6);  // bass drives the travel
+
   for (const r of cosmos.rings) r.depth += speed * dt;
-  cosmos.rings = cosmos.rings.filter(r => r.depth < 1.2);
-  if (cosmos.rings.length < 15 && (cosmos.rings.length === 0 ||
-      cosmos.rings[cosmos.rings.length - 1].depth > 0.12)) {
-    cosmos.rings.push({ depth: 0.02 });
+  cosmos.rings = cosmos.rings.filter(r => r.depth < 1);
+
+  // A bright ring emanates on every detected beat; a steady tempo-paced ring
+  // fills in if no beat has landed for a beat-period so it never stalls.
+  cosmos.sinceSpawn += dt;
+  if (a.beat && cosmos.rings.length < 24) {
+    cosmos.rings.push({ depth: 0.001, accent: true });
+    cosmos.sinceSpawn = 0;
+  } else if (cosmos.sinceSpawn >= beatPeriod && cosmos.rings.length < 24) {
+    cosmos.sinceSpawn -= beatPeriod;
+    cosmos.rings.push({ depth: 0.001, accent: false });
   }
-  if (a.beat) cosmos.rings.push({ depth: 0.02, warp: true });
 
   const cx = w / 2, cy = h / 2;
-  const VG = window.ViewGeometry, PC = window.PaletteColor;
+  const maxR = Math.min(w, h) * 0.46;          // largest ring stays on-screen
+  const pulse = 1 + bp * 0.12;                  // whole field pulses on the beat
+  const PC = window.PaletteColor;
   for (const r of cosmos.rings) {
-    const t = Math.max(0, Math.min(1, r.depth));
-    const scale = 0.1 + t * 4.0;
-    const pts = VG.ringDeform(raw, { cx, cy, baseR: fov, amp: fov * 0.5, scale, nPoints: 96 });
+    const t = r.depth;
+    const radius = (6 + maxR * t) * pulse;
     const color = PC ? PC.colorAt(theme, t) : theme.fg;
-    g.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
-    g.stroke({ color, width: r.warp ? theme.lineWidth * 2 : theme.lineWidth, alpha: r.warp ? 1 : 0.5 + t * 0.5 });
+    const alpha = Math.min(1, (1 - t) * 1.5) * (r.accent ? 1 : 0.55);
+    g.circle(cx, cy, radius).stroke({
+      color, width: r.accent ? theme.lineWidth * 2.5 : theme.lineWidth, alpha,
+    });
   }
 }
 
-const grove = { leaves: null };
+const grove = { leaves: null, edge: null, lastT: 0, sinceSpawn: 0 };
 
 function drawGrove(g, analyser, theme, w, h) {
   if (!analyser) return;
   const raw = new Float32Array(analyser.fftSize);
   analyser.getFloatTimeDomainData(raw);
-  const N = 64, edge = new Float32Array(N);
-  for (let i = 0; i < N; i++) edge[i] = raw[Math.floor((i / N) * raw.length)];
+  const now = performance.now() / 1000;
+  const dt = grove.lastT ? Math.min(0.05, now - grove.lastT) : 0.016;
+  grove.lastT = now;
 
   const a = state.audio || {};
+  const N = 40;
+  if (!grove.edge || grove.edge.length !== N) grove.edge = new Float32Array(N);
+  // Downsample with local averaging (spatial smoothing) + a temporal EMA so the
+  // canopy silhouette undulates gently instead of tracing raw waveform noise.
+  const step = raw.length / N;
+  for (let i = 0; i < N; i++) {
+    const base = Math.floor(i * step);
+    const span = Math.max(1, Math.floor(step));
+    let s = 0;
+    for (let k = 0; k < span; k++) s += raw[Math.min(raw.length - 1, base + k)];
+    grove.edge[i] = grove.edge[i] * 0.82 + (s / span) * 0.18;
+  }
+
   const VG = window.ViewGeometry, PC = window.PaletteColor;
   const baseY = h * 0.42;
-  const poly = VG.canopyEdge(edge, { w, h, baseY, amp: h * 0.12 * (1 + (a.bassAtt || 0)) });
+  const amp = h * 0.06 * (1 + (a.bassAtt || 0) * 0.5);   // calmer than before
+  const poly = VG.canopyEdge(grove.edge, { w, h, baseY, amp });
 
   const foliage = PC ? PC.colorAt(theme, 0.45) : theme.fg;
   g.moveTo(poly[0][0], poly[0][1]);
@@ -1477,80 +1506,103 @@ function drawGrove(g, analyser, theme, w, h) {
   g.closePath();
   g.fill({ color: foliage, alpha: 0.85 });
 
-  // Trunks at a fixed 20/40/60/80% spread (intentional even spacing).
+  // Trunks at a fixed 20/40/60/80% spread.
   const bark = PC ? PC.colorAt(theme, 0.18) : theme.fg;
   for (let i = 1; i <= 4; i++) {
     const x = (i / 5) * w;
-    const yTop = baseY - edge[Math.floor((i / 5) * N)] * h * 0.12;
+    const yTop = baseY - grove.edge[Math.floor((i / 5) * N)] * amp;
     g.moveTo(x, yTop); g.lineTo(x, h);
     g.stroke({ color: bark, width: 6, alpha: 0.9 });
   }
 
+  // Falling fruit: a ripe coral fruit drops on every detected beat (so the
+  // music visibly shakes them loose), plus a slow tempo-paced gold leaf so the
+  // canopy never looks dead between beats. Both fall the full screen height,
+  // visible the whole way down, and are large enough to read clearly.
   if (!grove.leaves && window.Particles) grove.leaves = window.Particles.createParticleField(40);
   if (grove.leaves) {
-    // clamp per-frame spawns so a treb spike can't replace the whole field in
-    // one frame; field capacity (40) is the hard ceiling.
-    const spawnN = Math.min(6, Math.round((a.treb || 0) * 3) + (a.beat ? 8 : 0));
-    for (let i = 0; i < spawnN; i++) {
-      grove.leaves.spawn({ x: Math.random() * w, y: baseY, vx: (Math.random() - 0.5) * 30,
-        vy: 20 + Math.random() * 40, life: 2 + Math.random() * 2, t: 0.6 + Math.random() * 0.4 });
+    const bpm = state.tempo ? state.tempo.avgBpm() : 120;
+    const beatPeriod = 60 / bpm;
+    const dropAt = (tone) => {
+      const fall = h * (0.18 + Math.random() * 0.1);        // px/sec, scaled to screen
+      grove.leaves.spawn({
+        x: (0.08 + Math.random() * 0.84) * w, y: baseY,
+        vx: (Math.random() - 0.5) * 24, vy: fall,
+        life: (h - baseY) / fall + 0.5, t: tone,
+      });
+    };
+    if (a.beat) dropAt(0.74);                                // beat -> coral fruit
+    grove.sinceSpawn += dt;
+    if (grove.sinceSpawn >= beatPeriod * 1.5) {              // steady gold leaf filler
+      grove.sinceSpawn -= beatPeriod * 1.5;
+      dropAt(0.62);
     }
-    grove.leaves.update(0.016);
+    grove.leaves.update(dt);
     for (const p of grove.leaves.alive()) {
-      g.circle(p.x, p.y, 3).fill({ color: PC ? PC.colorAt(theme, p.t) : theme.fg,
-        alpha: Math.max(0, 1 - p.age / p.life) });
+      const fade = p.age > p.life - 0.6 ? Math.max(0, (p.life - p.age) / 0.6) : 1;
+      g.circle(p.x, p.y, 6).fill({ color: PC ? PC.colorAt(theme, p.t) : theme.fg, alpha: fade });
     }
   }
 }
 
-const firebird = { sparks: null };
+const firebird = { sparks: null, lastT: 0, phase: 0, sinceSpawn: 0 };
 
-function drawFirebird(g, analyserL, analyserR, theme, w, h) {
-  if (!analyserL || !analyserR) return;
-  const n = analyserL.fftSize;
-  const L = new Float32Array(n), R = new Float32Array(n);
-  analyserL.getFloatTimeDomainData(L);
-  analyserR.getFloatTimeDomainData(R);
-  const M = 48, dL = new Float32Array(M), dR = new Float32Array(M);
-  for (let i = 0; i < M; i++) { const k = Math.floor((i / M) * n); dL[i] = L[k]; dR[i] = R[k]; }
+// Flame-bird: a rising flame body with a white-hot heart, two symmetric filled
+// wings that flap in tempo (one flap per beat, flaring wider on a detected
+// beat), and rising embers. Driven by normalised state.audio (beatPulse,
+// bassAtt) + tempo, not the raw lissajous (that produced a chaotic spindle).
+function drawFirebird(g, theme, w, h) {
+  const now = performance.now() / 1000;
+  const dt = firebird.lastT ? Math.min(0.05, now - firebird.lastT) : 0.016;
+  firebird.lastT = now;
 
   const a = state.audio || {};
-  const VG = window.ViewGeometry, PC = window.PaletteColor;
-  const cx = w / 2, cy = h * 0.55;
-  const thrust = 1 + (a.bassAtt || 0) * 0.8;
-  const spread = (0.18 + (a.mid || 0) * 0.06) * Math.min(w, h) * (a.beat ? 1.5 : 1);
-  const { left, right } = VG.wingFromLissajous(dL, dR, { cx, cy, scale: spread });
+  const bp = a.beatPulse || 0;                            // 0..1, spikes per beat
+  const att = Math.max(0, (a.bassAtt || 1) - 1);          // excess bass, 0 baseline
+  const bpm = state.tempo ? state.tempo.avgBpm() : 120;
+  const PC = window.PaletteColor;
+  const col = (t) => (PC ? PC.colorAt(theme, t) : theme.fg);
+  const cx = w / 2, cy = h * 0.52, unit = Math.min(w, h);
 
-  // flame body + tail: a vertical column from above the core down past it,
-  // coloured core (white-hot) -> ember at the tail tip.
-  const bodyTop = cy - 60 * thrust, tailBot = cy + 70 * thrust;
-  g.moveTo(cx, bodyTop); g.lineTo(cx, tailBot);
-  g.stroke({ color: PC ? PC.colorAt(theme, 0.55) : theme.fg, width: 8, alpha: 0.85 });
+  firebird.phase += dt * (bpm / 60) * Math.PI * 2;        // one flap per beat
+  const flap = 0.5 + 0.5 * Math.sin(firebird.phase);      // 0 folded .. 1 spread
+  const open = Math.min(1, 0.4 + 0.45 * flap + bp * 0.25);   // flaps + flares on beat
+  const thrust = 1 + Math.min(1, att) * 0.5;
 
-  const drawWing = (pts) => {
-    g.moveTo(cx, cy);
-    for (const [x, y] of pts) g.lineTo(x, y * thrust + cy * (1 - thrust));
-    g.stroke({ color: PC ? PC.colorAt(theme, 0.2) : theme.fg, width: theme.lineWidth, alpha: 0.9 });
-  };
-  drawWing(right);
-  drawWing(left);
-  g.circle(cx, cy - 20 * thrust, 10).fill({ color: PC ? PC.colorAt(theme, 0.98) : theme.fg });
+  const shoulderY = cy - unit * 0.03;
+  const span = unit * 0.34 * open;            // wingtip horizontal reach
+  const rise = unit * 0.22 * open * thrust;   // wingtip lift
+  const drop = unit * 0.16;                    // trailing-edge drop
 
-  if (!firebird.sparks && window.Particles) firebird.sparks = window.Particles.createParticleField(100);
+  // ---- filled wings, mirrored ----
+  for (const side of [-1, 1]) {
+    const tipX = cx + side * span, tipY = shoulderY - rise;
+    const lowX = cx + side * span * 0.42, lowY = shoulderY + drop;
+    g.moveTo(cx, shoulderY);
+    g.quadraticCurveTo(cx + side * span * 0.5, tipY - unit * 0.03, tipX, tipY);
+    g.quadraticCurveTo(cx + side * span * 0.7, shoulderY + unit * 0.01, lowX, lowY);
+    g.quadraticCurveTo(cx + side * span * 0.12, shoulderY + drop * 0.4, cx, shoulderY);
+    g.fill({ color: col(0.42), alpha: 0.8 });
+  }
+
+  // ---- rising embers, tempo-paced, few ----
+  if (!firebird.sparks && window.Particles) firebird.sparks = window.Particles.createParticleField(60);
   if (firebird.sparks) {
-    const tipR = right[right.length - 1], tipL = left[left.length - 1];
-    // clamp per-frame spawns so a beat/treb spike can't flush the field in one
-    // frame; field capacity (100) is the hard ceiling.
-    const spawnN = Math.min(10, Math.round((a.treb || 0) * 4) + (a.beat ? 16 : 0));
-    for (let i = 0; i < spawnN; i++) {
-      const tip = i % 2 ? tipR : tipL;
-      firebird.sparks.spawn({ x: tip[0], y: tip[1], vx: (Math.random() - 0.5) * 60,
-        vy: -40 - Math.random() * 60, life: 0.6 + Math.random() * 0.6, t: 0.5 + Math.random() * 0.5 });
+    const halfBeat = 30 / bpm;
+    firebird.sinceSpawn += dt;
+    let n = 0;
+    if (firebird.sinceSpawn >= halfBeat) { firebird.sinceSpawn -= halfBeat; n = 1; }
+    if (a.beat) n += 3;
+    for (let i = 0; i < n; i++) {
+      firebird.sparks.spawn({
+        x: cx + (Math.random() - 0.5) * unit * 0.05, y: cy - unit * 0.02,
+        vx: (Math.random() - 0.5) * unit * 0.04, vy: -unit * (0.12 + Math.random() * 0.08),
+        life: 1.2 + Math.random() * 0.8, t: 0.62 + Math.random() * 0.36,
+      });
     }
-    firebird.sparks.update(0.016);
+    firebird.sparks.update(dt);
     for (const p of firebird.sparks.alive()) {
-      g.circle(p.x, p.y, 2).fill({ color: PC ? PC.colorAt(theme, p.t) : theme.fg,
-        alpha: Math.max(0, 1 - p.age / p.life) });
+      g.circle(p.x, p.y, 2.2).fill({ color: col(p.t), alpha: Math.max(0, 1 - p.age / p.life) });
     }
   }
 }
