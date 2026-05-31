@@ -99,6 +99,20 @@ export default [
       "no-empty": ["error", { allowEmptyCatch: true }],
     },
   },
+  // Beat-harness tooling: Node CommonJS
+  {
+    files: ["tools/**/*.js"],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: "commonjs",
+      globals: globals.node,
+    },
+    rules: {
+      ...js.configs.recommended.rules,
+      "no-unused-vars": "off",
+      "no-empty": ["error", { allowEmptyCatch: true }],
+    },
+  },
   // Playwright config: Node CommonJS
   {
     files: ["playwright.config.js"],

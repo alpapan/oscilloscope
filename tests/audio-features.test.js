@@ -4,7 +4,6 @@ const {
   pcmSmooth,
   sumBand,
   createLoudnessTracker,
-  createBeatDetector,
   createAudioAnalysis,
 } = require("../audio-features.js");
 
@@ -97,34 +96,12 @@ test("createLoudnessTracker: FPS-adjusted decay is rate-invariant", () => {
   assert.ok(Math.abs(la60 - la30) < 0.02);
 });
 
-test("createBeatDetector: no beat on flat input", () => {
-  const t = createLoudnessTracker({ attack: 0.2, release: 0.5, longRate: 0.992 });
-  const det = createBeatDetector(t, { threshold: 1.5, refractoryMs: 200 });
-  for (let i = 0; i < 200; i++) {
-    assert.equal(det.update(0.5, 1 / 60, i * 16.7), false);
-  }
-});
-
-test("createBeatDetector: beat fires on spike", () => {
-  const t = createLoudnessTracker({ attack: 0.2, release: 0.5, longRate: 0.992 });
-  const det = createBeatDetector(t, { threshold: 1.5, refractoryMs: 200 });
-  for (let i = 0; i < 100; i++) det.update(0.1, 1 / 60, i * 16.7);
-  assert.equal(det.update(1.0, 1 / 60, 100 * 16.7), true);
-});
-
-test("createBeatDetector: refractory window suppresses re-trigger", () => {
-  const t = createLoudnessTracker({ attack: 0.2, release: 0.5, longRate: 0.992 });
-  const det = createBeatDetector(t, { threshold: 1.5, refractoryMs: 200 });
-  for (let i = 0; i < 100; i++) det.update(0.1, 1 / 60, i * 16.7);
-  det.update(1.0, 1 / 60, 100 * 16.7);
-  assert.equal(det.update(1.0, 1 / 60, 100 * 16.7 + 50), false);
-  assert.equal(det.update(1.0, 1 / 60, 100 * 16.7 + 250), true);
-});
-
-test("createAudioAnalysis: factory bundles update into one state snapshot", () => {
+test("createAudioAnalysis: bundles features and drives the causal beat tracker", () => {
   // Bass band [20, 250] Hz at FFT=2048 @ 48 kHz covers bins 1..10. Quiet
-  // baseline then a hard spike: ratio crosses the beat threshold, the
-  // pulse latches to 1, decays exponentially with tau=250 ms.
+  // baseline establishes bass/mid/treb; a steady low-band kick pattern then
+  // drives the causal tracker, which must lock, emit beats, latch beatPulse to
+  // 1, and report a positive bpm. A single spike no longer fires - the tracker
+  // needs an established periodicity, which is the point of the rewrite.
   const bins = new Uint8Array(1024);
   for (let i = 1; i <= 10; i++) bins[i] = 50;             // quiet bass
   for (let i = 11; i < 1024; i++) bins[i] = 5;            // mid/treble quiet
@@ -134,25 +111,22 @@ test("createAudioAnalysis: factory bundles update into one state snapshot", () =
     sampleRate: 48000, fftSize: 2048,
   });
 
-  let last = null;
-  for (let i = 0; i < 60; i++) last = af.update(1 / 60, i * 16.7);
-  assert.ok(last.bass > 0, `bass=${last.bass}`);
-  assert.ok(last.mid >= 0 && last.treb >= 0);
+  const first = af.update(1 / 60, 0);
+  assert.ok(first.bass > 0, `bass=${first.bass}`);
+  assert.ok(first.mid >= 0 && first.treb >= 0);
 
-  for (let i = 1; i <= 10; i++) bins[i] = 255;
+  // Steady 120 bpm kick: a low-band onset every 30 frames for ~5 s.
   let beatSeen = false;
-  let beatT = 0;
-  for (let i = 60; i < 80 && !beatSeen; i++) {
-    const s = af.update(1 / 60, i * 16.7);
-    if (s.beat) { beatSeen = true; beatT = i * 16.7; assert.equal(s.beatPulse, 1); }
+  let lastBpm = 0;
+  for (let f = 1; f < 300; f++) {
+    const kick = f % 30 === 0;
+    for (let i = 1; i <= 10; i++) bins[i] = kick ? 255 : 50;
+    const s = af.update(1 / 60, (f * 1000) / 60);
+    if (s.beat) { beatSeen = true; assert.equal(s.beatPulse, 1); }
+    lastBpm = s.bpm;
   }
-  assert.ok(beatSeen, "expected a beat on bass spike");
-
-  // Drop bass to baseline before checking beatPulse decay; otherwise the
-  // refractory window expires and a new beat fires, re-setting beatPulse=1.
-  for (let i = 1; i <= 10; i++) bins[i] = 50;
-  const after = af.update(0.250, beatT + 250);
-  assert.ok(after.beatPulse < 1 / Math.E + 0.1, `pulse=${after.beatPulse}`);
+  assert.ok(beatSeen, "expected the causal tracker to emit beats on a steady kick pattern");
+  assert.ok(typeof lastBpm === "number" && lastBpm > 0, `bpm should be a positive number, got ${lastBpm}`);
 });
 
 test("createAudioAnalysis: null analyser returns zero state without crashing", () => {
