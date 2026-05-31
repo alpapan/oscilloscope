@@ -1280,12 +1280,20 @@ function drawWaveform(g, analyser, theme, w, h) {
   if (!analyser) return;
   const raw = new Float32Array(analyser.fftSize);
   analyser.getFloatTimeDomainData(raw);
-  const preSmooth = window.AudioFeatures
-    ? window.AudioFeatures.pcmSmooth(raw, getPcmScratch("L", raw.length))
-    : raw;
-  const buf = smoothBuf("L", preSmooth, state.smoothing);
-
-  const start = findZeroCrossing(buf);
+  let buf, start;
+  if (state.tvMode) {
+    // Phone-side prep (5a) already ran pcmSmooth + smoothBuf + findZeroCrossing
+    // + trim before encoding the wire frame. Re-running those here would either
+    // double-smooth or re-trim to a later cycle's crossing (visible cycle jumps).
+    buf = raw;
+    start = 0;
+  } else {
+    const preSmooth = window.AudioFeatures
+      ? window.AudioFeatures.pcmSmooth(raw, getPcmScratch("L", raw.length))
+      : raw;
+    buf = smoothBuf("L", preSmooth, state.smoothing);
+    start = findZeroCrossing(buf);
+  }
   const len = buf.length - start;
   if (len < 2) return;
 
@@ -1330,14 +1338,21 @@ function drawLissajous(g, analyserL, analyserR, theme, w, h) {
   const rawR = new Float32Array(n);
   analyserL.getFloatTimeDomainData(rawL);
   analyserR.getFloatTimeDomainData(rawR);
-  const preL = window.AudioFeatures
-    ? window.AudioFeatures.pcmSmooth(rawL, getPcmScratch("L", n))
-    : rawL;
-  const preR = window.AudioFeatures
-    ? window.AudioFeatures.pcmSmooth(rawR, getPcmScratch("R", n))
-    : rawR;
-  const bufL = smoothBuf("L", preL, state.smoothing);
-  const bufR = smoothBuf("R", preR, state.smoothing);
+  let bufL, bufR;
+  if (state.tvMode) {
+    // Phone-side prep (5a) already smoothed both channels. Skip to avoid double-smoothing.
+    bufL = rawL;
+    bufR = rawR;
+  } else {
+    const preL = window.AudioFeatures
+      ? window.AudioFeatures.pcmSmooth(rawL, getPcmScratch("L", n))
+      : rawL;
+    const preR = window.AudioFeatures
+      ? window.AudioFeatures.pcmSmooth(rawR, getPcmScratch("R", n))
+      : rawR;
+    bufL = smoothBuf("L", preL, state.smoothing);
+    bufR = smoothBuf("R", preR, state.smoothing);
+  }
 
   const radius = Math.min(w, h) * 0.4;
   const cx = w / 2;

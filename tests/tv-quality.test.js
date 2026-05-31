@@ -36,3 +36,16 @@ test("index.html fft dropdown uses k-labelled options and excludes 256 / 32768",
   assert.doesNotMatch(html, /<option[^>]*>256<\/option>/);
   assert.doesNotMatch(html, /<option[^>]*>32768<\/option>/);
 });
+
+test("drawWaveform branches on state.tvMode to skip phone-side prep already done", () => {
+  const js = read("main.js");
+  // In TV mode the wire data is already pcmSmooth+smoothBuf+findZeroCrossing-prepped on the phone.
+  // drawWaveform must skip those steps in TV mode to avoid double-smoothing or re-trim to a later cycle's crossing.
+  assert.match(js, /function\s+drawWaveform[\s\S]{0,800}?if\s*\(\s*state\.tvMode\s*\)/);
+});
+
+test("drawLissajous branches on state.tvMode to skip phone-side prep already done", () => {
+  const js = read("main.js");
+  // Same as drawWaveform: phone already smoothed both channels.
+  assert.match(js, /function\s+drawLissajous[\s\S]{0,800}?if\s*\(\s*state\.tvMode\s*\)/);
+});
