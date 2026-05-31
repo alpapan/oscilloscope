@@ -41,7 +41,9 @@ docs/superpowers/specs/
 # Google Play submission scratch artefacts - kept local, never committed.
 # play-listing/ holds screenshots, feature graphic, TV banner, etc.
 # that get uploaded to the Play Console rather than living in the
-# source tree. docs/privacy-policy.md is intentionally NOT ignored -
-# it is the one Play document the public Play listing links to and
-# therefore needs a public URL in this repo.
+# source tree. The explicit !docs/privacy-policy.md negation below
+# guarantees the privacy policy stays tracked even if a future
+# ignore rule starts excluding docs/ more broadly - the Play Store
+# listing URL points to it as a public document.
 play-listing/
+!docs/privacy-policy.md
