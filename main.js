@@ -118,10 +118,6 @@ const state = {
   audioAnalysis: null,    // createAudioAnalysis instance, set after analysers up
   audio: { bass: 0, mid: 0, treb: 0, bassAtt: 0, beat: false, beatPulse: 0, longAverage: 0 },
   screenLock: null,       // WakeLockSentinel; set by requestScreenLock
-  // Fullscreen is gated on capture being active AND the user-facing toggle
-  // being on (default on). The toggle persists to localStorage so turning
-  // it off survives session restarts.
-  fullscreenEnabled: true,
   // Android-only: track the immersive (system-bars-hidden) state ourselves
   // since the standard Fullscreen API does not hide the status/nav bars on
   // a Capacitor WebView. The native bridge call below does the actual hide.
@@ -143,26 +139,13 @@ function isInFullscreen() {
 function refreshFullscreenUI() {
   if (typeof document === "undefined") return;
   const inFs = isInFullscreen();
-  const show = state.fullscreenEnabled && state.running;
   for (const id of ["mobile-fullscreen", "fullscreen"]) {
     const el = document.getElementById(id);
     if (!el) continue;
-    el.hidden = !show;
+    el.hidden = !state.running;
     el.textContent = inFs ? "Exit fullscreen" : "Fullscreen";
   }
 }
-
-function setFullscreenEnabled(enabled) {
-  state.fullscreenEnabled = !!enabled;
-  try {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem("scope.fullscreenEnabled", state.fullscreenEnabled ? "true" : "false");
-    }
-  } catch (_e) { /* private mode etc. */ }
-  if (!state.fullscreenEnabled) exitFullscreenIfActive();
-  refreshFullscreenUI();
-}
-if (typeof window !== "undefined") window.setFullscreenEnabled = setFullscreenEnabled;
 
 async function setAndroidImmersive(enabled) {
   if (PLATFORM !== "android") return;
@@ -238,6 +221,7 @@ const audio = {
   audioChunkHandle: null,
   silentCaptureHandle: null,
   unrestrictedHandle: null,
+  captureLostHandle: null,
 };
 
 const pixi = {
@@ -544,6 +528,7 @@ async function startCaptureAndroid() {
     // in mic mode, when an unflagged source becomes available again.
     audio.silentCaptureHandle = await plugin.addListener("silentCapture", onSilentCapture);
     audio.unrestrictedHandle = await plugin.addListener("unrestrictedAvailable", onUnrestrictedAvailable);
+    audio.captureLostHandle = await plugin.addListener("captureLost", onCaptureLost);
   } catch (err) {
     setStatus(`Graph wire-up failed: ${err.message || err}`);
     if (audio.ctx) { try { await audio.ctx.close(); } catch (_e) {} audio.ctx = null; }
@@ -599,6 +584,20 @@ function onAudioChunkAndroid(event) {
 // for ~1s) while another app is actively playing matching audio. The track
 // is opted out via FLAG_NO_MEDIA_PROJECTION. Offer mic-mode fallback (or
 // auto-switch if the user has opted into that in settings).
+// Called by native service when MediaProjection.Callback.onStop fires:
+// (a) user tapped our notification's "Stop" action; (b) user tapped Android's
+// own "Stop sharing" notification; (c) audio routing change invalidated the
+// mix; (d) system-imposed token expiry. Capture is dead at the native layer;
+// route through the regular stopCapture flow so the JS state (UI buttons,
+// audio nodes, listeners) is fully synchronised, then surface the reason.
+function onCaptureLost(_e) {
+  if (state.running || audio.stream || audio.ctx) {
+    stopCapture();
+  }
+  setStatus("Capture stopped. Tap Capture audio or Capture mic to start again.");
+  window.MobileUI?.showToast?.("Capture stopped");
+}
+
 function onSilentCapture() {
   if (state.micModeAuto) {
     autoSwitchToMode(true, "Switched to microphone (source is DRM-protected)");
@@ -730,6 +729,10 @@ async function stopCaptureAndroid(opts) {
   if (audio.unrestrictedHandle && audio.unrestrictedHandle.remove) {
     await audio.unrestrictedHandle.remove();
     audio.unrestrictedHandle = null;
+  }
+  if (audio.captureLostHandle && audio.captureLostHandle.remove) {
+    await audio.captureLostHandle.remove();
+    audio.captureLostHandle = null;
   }
   const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
   if (plugin) {
@@ -1390,8 +1393,6 @@ async function init() {
     try {
       if (typeof localStorage !== "undefined") {
         if (localStorage.getItem("scope.micModeAuto") === "true") state.micModeAuto = true;
-        const fs = localStorage.getItem("scope.fullscreenEnabled");
-        if (fs === "false") state.fullscreenEnabled = false;
       }
     } catch (_e) { /* private mode etc. - ignore */ }
 
@@ -1635,12 +1636,6 @@ async function init() {
     const fsBtn = document.getElementById("fullscreen");
     if (fsBtn) fsBtn.addEventListener("click", toggleFullscreen);
 
-    const fsToggle = document.getElementById("allow-fullscreen");
-    if (fsToggle) {
-      fsToggle.checked = !!state.fullscreenEnabled;
-      fsToggle.addEventListener("change", (e) => setFullscreenEnabled(e.target.checked));
-    }
-
     document.addEventListener("keydown", (e) => {
       if (!state.running && e.key !== "Escape") return;
       if (e.key === "1") { state.view = "waveform";  applyState(); }
@@ -1656,7 +1651,7 @@ async function init() {
         applyState();
       }
       if (e.key === "f" || e.key === "F") {
-        if ((state.fullscreenEnabled && state.running) || isInFullscreen()) toggleFullscreen();
+        if (state.running || isInFullscreen()) toggleFullscreen();
       }
       if (e.key === "Escape") stopCapture();
     });

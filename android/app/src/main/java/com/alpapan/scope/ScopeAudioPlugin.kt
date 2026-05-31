@@ -210,6 +210,12 @@ class ScopeAudioPlugin : Plugin() {
     /** Called by AudioCaptureService periodically in mic mode when an unflagged
      *  source becomes available; JS can offer the user to switch back to the
      *  higher-quality projection path. */
+    /** Phone-side: MediaProjection callback fired onStop (system revoked the
+     *  projection). JS shows a banner / offers re-prompt. */
+    fun notifyCaptureLost(reason: String) {
+        notifyListeners("captureLost", JSObject().put("reason", reason))
+    }
+
     fun notifyUnrestrictedAvailable() {
         notifyListeners("unrestrictedAvailable", JSObject())
     }

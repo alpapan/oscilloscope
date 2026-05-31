@@ -116,7 +116,8 @@ class MainActivity : BridgeActivity() {
         //     keep capturing even with no PiP and no focus (else mic dies on
         //     background and never restarts).
         val streaming = ScopeAudioPlugin.instance?.isStreamingToTv == true
-        if (CaptureLifecycle.shouldStopOnStop(isFinishing, isInPictureInPictureMode, streaming)) {
+        val capturing = ScopeAudioPlugin.instance?.isCapturing == true
+        if (CaptureLifecycle.shouldStopOnStop(isFinishing, isInPictureInPictureMode, streaming, capturing)) {
             stopService(Intent(this, AudioCaptureService::class.java))
             ScopeAudioPlugin.instance?.markStopped()
         }

@@ -55,6 +55,22 @@ test("mobile-ui.js FFT_VALUES uses the same six values as the desktop select (dr
   assert.match(js, /FFT_VALUES\s*=\s*\[\s*512\s*,\s*1024\s*,\s*2048\s*,\s*4096\s*,\s*8192\s*,\s*16384\s*\]/);
 });
 
+test("main.js registers a captureLost listener with cleanup handle", () => {
+  const js = read("main.js");
+  // The listener is added alongside the existing silentCapture / unrestrictedAvailable
+  // ones, and the handle is removed in cleanup to mirror those.
+  assert.match(js, /audio\.captureLostHandle\s*=\s*await\s+plugin\.addListener\(\s*["']captureLost["']/);
+  assert.match(js, /audio\.captureLostHandle[\s\S]{0,200}?\.remove\(\)/);
+});
+
+test("main.js onCaptureLost handler routes through stopCapture for full UI sync", () => {
+  const js = read("main.js");
+  // The handler must invoke stopCapture (which tears down audio nodes + listeners
+  // + sets running=false + restores UI) rather than only setRunning(false), so
+  // the JS state stays in sync when the notification Stop button kills the service.
+  assert.match(js, /function\s+onCaptureLost[\s\S]{0,400}?stopCapture\(\)[\s\S]{0,400}?(setStatus|showToast)/);
+});
+
 test("mobile-ui.js renders fftSize as a k-label in the mobile picker", () => {
   const js = read("mobile-ui.js");
   // The mobile picker's value span must display "0.5k"/"1k"/.../"16k" not the raw integer.

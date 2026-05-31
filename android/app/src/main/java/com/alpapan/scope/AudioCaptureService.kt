@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -31,6 +32,7 @@ class AudioCaptureService : Service() {
         const val EXTRA_PROJECTION_RESULT_CODE = "projection_result_code"
         const val EXTRA_PROJECTION_DATA = "projection_data"
         const val EXTRA_MIC_MODE = "mic_mode"
+        const val ACTION_STOP_CAPTURE = "com.alpapan.scope.ACTION_STOP_CAPTURE"
         private const val NOTIFICATION_ID = 0x5C09E    // "scope"-ish
         private const val CHANNEL_ID = "scope_audio_capture"
         private const val SAMPLE_RATE = 48000
@@ -63,6 +65,14 @@ class AudioCaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Notification "Stop" action and any other deliberate stop entrypoint
+        // dispatches via this action. Stops the service cleanly without going
+        // through Android's own "Stop sharing" (which kills the projection
+        // without giving us a chance to notify JS or clean up the FG state).
+        if (intent?.action == ACTION_STOP_CAPTURE) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (running) return START_STICKY
         val micMode = intent?.getBooleanExtra(EXTRA_MIC_MODE, false) ?: false
         if (micMode) {
@@ -100,8 +110,15 @@ class AudioCaptureService : Service() {
         }
         projection = proj
         // Per Android 14: register a callback before using projection.
+        // onStop fires when the system revokes the projection (user taps the
+        // OS-level "Stop sharing" notification, audio routing changes that
+        // invalidate the mix, system-imposed token expiry). Notify JS so the
+        // UI can surface a banner and offer a re-prompt, then stop ourselves.
         proj.registerCallback(object : MediaProjection.Callback() {
-            override fun onStop() { stopSelf() }
+            override fun onStop() {
+                pluginRef?.notifyCaptureLost("projection-stopped")
+                stopSelf()
+            }
         }, null)
         startReader(proj)
 
@@ -427,6 +444,17 @@ class AudioCaptureService : Service() {
         }, "ScopeMicReader").also { it.start() }
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // User swiped Scope from the recents tray. If capture is active, keep
+        // the foreground service alive so audio (mic / system-audio) continues
+        // uninterrupted; otherwise stop. The decision is in CaptureLifecycle
+        // so the rule is unit-tested.
+        if (CaptureLifecycle.shouldStopOnTaskRemoved(running)) {
+            stopSelf()
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         running = false
         try { record?.stop() } catch (_: Throwable) {}
@@ -450,11 +478,20 @@ class AudioCaptureService : Service() {
             ch.description = "Required for Scope to capture system audio"
             nm.createNotificationChannel(ch)
         }
+        // Stop action lets the user deliberately end capture from the
+        // notification, instead of relying on Android's own (poorly-discoverable)
+        // "Stop sharing" or task-swipe paths.
+        val stopIntent = Intent(this, AudioCaptureService::class.java).setAction(ACTION_STOP_CAPTURE)
+        val stopPi = PendingIntent.getService(
+            this, 0, stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle("Scope")
             .setContentText(text)
             .setOngoing(true)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPi)
             .build()
     }
 }
