@@ -433,6 +433,31 @@ class ScopeAudioPlugin : Plugin() {
                 } else null
                 com.alpapan.scope.tv.AnalysisFrameCodec.encodeWaveform(s.view, dL, dR)
             }
+            3, 4 -> {                                                              // cosmos/grove: mono waveform + FFT
+                val sL = WaveformPrep.pcmSmooth(winL, smoothScratchL)
+                val emaL = WaveformPrep.smoothBuf("L", sL, smoothingAlpha)
+                val dL = downsampleForWireIfConfigured(emaL)
+                val mono = FloatArray(winL.size) {
+                    (winL[it] + (winR?.getOrElse(it) { winL[it] } ?: winL[it])) * 0.5f
+                }
+                val mags = com.alpapan.scope.tv.Dsp.downsample(com.alpapan.scope.tv.Fft.magnitudes(mono), s.fftBins)
+                val db = FloatArray(mags.size) { 20f * log10((mags[it] + 1e-9f)) }
+                com.alpapan.scope.tv.AnalysisFrameCodec.encodeWaveformAndSpectrum(s.view, dL, null, db)
+            }
+            5 -> {                                                              // firebird: stereo waveform + FFT
+                val sL = WaveformPrep.pcmSmooth(winL, smoothScratchL)
+                val dL = downsampleForWireIfConfigured(WaveformPrep.smoothBuf("L", sL, smoothingAlpha))
+                val dR = if (winR != null) {
+                    val sR = WaveformPrep.pcmSmooth(winR, smoothScratchR)
+                    downsampleForWireIfConfigured(WaveformPrep.smoothBuf("R", sR, smoothingAlpha))
+                } else null
+                val mono = FloatArray(winL.size) {
+                    (winL[it] + (winR?.getOrElse(it) { winL[it] } ?: winL[it])) * 0.5f
+                }
+                val mags = com.alpapan.scope.tv.Dsp.downsample(com.alpapan.scope.tv.Fft.magnitudes(mono), s.fftBins)
+                val db = FloatArray(mags.size) { 20f * log10((mags[it] + 1e-9f)) }
+                com.alpapan.scope.tv.AnalysisFrameCodec.encodeWaveformAndSpectrum(s.view, dL, dR, db)
+            }
             else -> {                                                           // waveform (view==0): smooth + trigger + trim + downsample
                 val sL = WaveformPrep.pcmSmooth(winL, smoothScratchL)
                 val emaL = WaveformPrep.smoothBuf("L", sL, smoothingAlpha)

@@ -20,6 +20,8 @@ for f in \
     swipe-detector.js \
     mobile-ui.js \
     tv-frame-decode.js \
+    particles.js \
+    view-geometry.js \
     favicon.ico \
     icon.svg \
     icon-192.png \

@@ -2,6 +2,19 @@
 // See docs/superpowers/specs/2026-05-16-music-oscilloscope-design.md
 /** @ts-check */
 
+/**
+ * @typedef {Object} AudioState
+ * @property {number} bass
+ * @property {number} mid
+ * @property {number} treb
+ * @property {number} bassAtt
+ * @property {boolean} beat
+ * @property {number} beatPulse
+ * @property {number} longAverage
+ * @property {number} rms
+ * @property {number} rmsLongAverage
+ */
+
 // =============================================================================
 // Pure helpers (also testable in Node)
 // =============================================================================
@@ -98,6 +111,7 @@ function setStatus(text) {
   if (mel) mel.textContent = text;
 }
 
+/** @type {Object} */
 const state = {
   view: "waveform",       // "waveform" | "spectrum" | "lissajous"
   theme: "crt",           // "crt" | "neon" | "mono"
@@ -106,6 +120,9 @@ const state = {
   smoothing: 0.8,
   running: false,
   channels: 2,            // detected at capture start
+  tempo: null,
+  hueOffsetDeg: 0,
+  lastHueBakeMs: 0,
   // Per-band visual EQ mix (linear gain). Affects the time-domain signal
   // feeding the Waveform and Lissajous analysers only; the Spectrum view
   // reads the original (un-EQd) signal so the user can see what they are
@@ -116,7 +133,8 @@ const state = {
   micMode: false,         // ON: capture via mic (works for DRM-flagged sources, degraded quality)
   micModeAuto: false,     // ON: auto-switch to mic when projection capture is silently filtered, no prompt
   audioAnalysis: null,    // createAudioAnalysis instance, set after analysers up
-  audio: { bass: 0, mid: 0, treb: 0, bassAtt: 0, beat: false, beatPulse: 0, longAverage: 0 },
+  /** @type {AudioState} */
+  audio: { bass: 0, mid: 0, treb: 0, bassAtt: 0, beat: false, beatPulse: 0, longAverage: 0, rms: 0, rmsLongAverage: 0 },
   screenLock: null,       // WakeLockSentinel; set by requestScreenLock
   // Android-only: track the immersive (system-bars-hidden) state ourselves
   // since the standard Fullscreen API does not hide the status/nav bars on
@@ -234,11 +252,32 @@ const pixi = {
 
 const themes = {
   crt:  { fg: 0x33ff66, fgCss: "#33ff66", decayAlpha: 0.12, lineWidth: 1.5, filters: [],
-          hueCycleRadians: Math.PI / 12, hueShiftOnBeat: 0 },
+          hueCycleRadians: Math.PI / 12, hueShiftOnBeat: 0,
+          ramp: [{ L: 0.78, C: 0.20, h: 145 }] },
   neon: { fg: 0x00e5ff, fgCss: "#00e5ff", decayAlpha: 1.0,  lineWidth: 2.0, filters: [],
-          hueCycleRadians: Math.PI,      hueShiftOnBeat: Math.PI / 3 },
+          hueCycleRadians: Math.PI,      hueShiftOnBeat: Math.PI / 3,
+          ramp: [{ L: 0.82, C: 0.13, h: 220 }] },
   mono: { fg: 0xffffff, fgCss: "#ffffff", decayAlpha: 1.0,  lineWidth: 1.0, filters: [],
-          hueCycleRadians: 0,            hueShiftOnBeat: 0 },
+          hueCycleRadians: 0,            hueShiftOnBeat: 0,
+          ramp: [{ L: 1.0, C: 0.0, h: 0 }] },
+  nebula: { fg: 0x764be5, fgCss: "#764be5", decayAlpha: 1.0, lineWidth: 2.0, filters: [],
+          hueCycleRadians: 0, hueShiftOnBeat: 0, ramp: [
+            { L: 0.08, C: 0.04, h: 270 }, { L: 0.20, C: 0.07, h: 265 },
+            { L: 0.35, C: 0.17, h: 270 }, { L: 0.55, C: 0.22, h: 290 },
+            { L: 0.72, C: 0.22, h: 320 }, { L: 0.85, C: 0.18, h: 345 },
+            { L: 0.96, C: 0.03, h: 245 } ] },
+  verdant: { fg: 0x1c882d, fgCss: "#1c882d", decayAlpha: 1.0, lineWidth: 2.0, filters: [],
+          hueCycleRadians: 0, hueShiftOnBeat: 0, ramp: [
+            { L: 0.20, C: 0.04, h: 145 }, { L: 0.32, C: 0.06, h: 50 },
+            { L: 0.42, C: 0.12, h: 135 }, { L: 0.55, C: 0.16, h: 145 },
+            { L: 0.70, C: 0.18, h: 95 },  { L: 0.72, C: 0.18, h: 25 },
+            { L: 0.85, C: 0.08, h: 230 } ] },
+  ember: { fg: 0xee5a00, fgCss: "#ee5a00", decayAlpha: 1.0, lineWidth: 2.0, filters: [],
+          hueCycleRadians: 0, hueShiftOnBeat: 0, ramp: [
+            { L: 0.15, C: 0.04, h: 30 }, { L: 0.35, C: 0.15, h: 25 },
+            { L: 0.50, C: 0.22, h: 30 }, { L: 0.65, C: 0.22, h: 55 },
+            { L: 0.80, C: 0.20, h: 80 }, { L: 0.92, C: 0.14, h: 95 },
+            { L: 0.98, C: 0.02, h: 95 } ] },
 };
 const THICK_OFFSETS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
 // Filters are populated inside init() once PIXI globals are available
@@ -852,10 +891,10 @@ function wireTvRemote() {
         // Round-trip via phone: compute the new view locally (without mutating
         // state.view) and ask the phone to apply. The phone will mirror back
         // and our tvRenderRequest listener (above) will then set state.view.
-        const order = ["waveform", "spectrum", "lissajous"];
+        const order = ["waveform", "spectrum", "lissajous", "cosmos", "grove", "firebird"];
         const idx = order.indexOf(state.view);
         const next = order[(idx + direction + order.length) % order.length];
-        const v = next === "spectrum" ? 1 : next === "lissajous" ? 2 : 0;
+        const v = next === "spectrum" ? 1 : next === "lissajous" ? 2 : next === "cosmos" ? 3 : next === "grove" ? 4 : next === "firebird" ? 5 : 0;
         window.Capacitor?.Plugins?.ScopeAudio?.sendRenderRequest({
           type: "remote-view-request", view: v,
         });
@@ -902,8 +941,8 @@ async function startTvMode() {
     try { payload = JSON.parse(e.json); } catch (_err) { return; }
     if (payload && payload.type === "mirror-state") {   // forward-compat: unknown types ignored
       const { view, theme } = payload;
-      state.view = view === 1 ? "spectrum" : view === 2 ? "lissajous" : "waveform";
-      if (["crt", "neon", "mono"].includes(theme)) state.theme = theme;
+      state.view = view === 1 ? "spectrum" : view === 2 ? "lissajous" : view === 3 ? "cosmos" : view === 4 ? "grove" : view === 5 ? "firebird" : "waveform";
+      if (["crt", "neon", "mono", "nebula", "verdant", "ember"].includes(theme)) state.theme = theme;
       applyState();
     }
   });
@@ -918,7 +957,7 @@ async function startTvMode() {
 
 // Tell the phone which arrays to compute for the current view.
 function sendTvRenderRequest() {
-  const v = state.view === "spectrum" ? 1 : state.view === "lissajous" ? 2 : 0;
+  const v = state.view === "spectrum" ? 1 : state.view === "lissajous" ? 2 : state.view === "cosmos" ? 3 : state.view === "grove" ? 4 : state.view === "firebird" ? 5 : 0;
   window.Capacitor?.Plugins?.ScopeAudio?.sendRenderRequest({
     type: "render-request", view: v, waveformPoints: state.fftSize, fftBins: state.fftSize >> 1, channels: v === 2 ? 2 : 1, fftSize: state.fftSize,
   });
@@ -1034,8 +1073,8 @@ async function connectToTv() {
   // resolved view back to the TV.
   await plugin.addListener("phoneViewRequest", (e) => {
     const view = e?.view;
-    if (![0, 1, 2].includes(view)) return;
-    state.view = view === 1 ? "spectrum" : view === 2 ? "lissajous" : "waveform";
+    if (![0, 1, 2, 3, 4, 5].includes(view)) return;
+    state.view = view === 1 ? "spectrum" : view === 2 ? "lissajous" : view === 3 ? "cosmos" : view === 4 ? "grove" : view === 5 ? "firebird" : "waveform";
     applyState();
   });
   renderTvList(found);
@@ -1047,7 +1086,7 @@ if (typeof window !== "undefined") window.connectToTv = connectToTv;
 // the phone's visual state. No-op when not paired - the JS-side state.paired
 // gates the call (the Kotlin side also no-ops when the socket is not connected).
 function sendPhoneMirror() {
-  const v = state.view === "spectrum" ? 1 : state.view === "lissajous" ? 2 : 0;
+  const v = state.view === "spectrum" ? 1 : state.view === "lissajous" ? 2 : state.view === "cosmos" ? 3 : state.view === "grove" ? 4 : state.view === "firebird" ? 5 : 0;
   window.Capacitor?.Plugins?.ScopeAudio?.sendPhoneMirror({
     type: "mirror-state", view: v, theme: state.theme,
   });
@@ -1156,6 +1195,14 @@ function frameBody() {
   if (state.audioAnalysis) {
     state.audio = state.audioAnalysis.update(dt / 1000, now);
   }
+  if (state.tempo && state.audio.beat) state.tempo.beat(now);
+  if (state.tempo && now - state.lastHueBakeMs > 60000) {
+    state.lastHueBakeMs = now;
+    state.hueOffsetDeg = window.AudioFeatures.bpmToHueDeg(state.tempo.avgBpm());
+    if (window.PaletteColor) {
+      for (const key of Object.keys(themes)) window.PaletteColor.bakeRamp(themes[key], state.hueOffsetDeg);
+    }
+  }
 
   if (audio.analyserL) {
     const probe = new Float32Array(audio.analyserL.fftSize);
@@ -1216,6 +1263,10 @@ function frameBody() {
     audio.eqAnalyserL || audio.analyserL,
     audio.eqAnalyserR || audio.analyserR,
     theme, w, h);
+  if (state.view === "cosmos") drawCosmos(pixi.current, audio.eqAnalyserL || audio.analyserL, theme, w, h);
+  if (state.view === "grove") drawGrove(pixi.current, audio.eqAnalyserL || audio.analyserL, theme, w, h);
+  if (state.view === "firebird") drawFirebird(pixi.current,
+    audio.eqAnalyserL || audio.analyserL, audio.eqAnalyserR || audio.analyserR, theme, w, h);
 
   // Step 3: bake current onto the trail texture.
   pixi.app.renderer.render(pixi.current, { renderTexture: pixi.trail, clear: false });
@@ -1372,6 +1423,138 @@ function drawLissajous(g, analyserL, analyserR, theme, w, h) {
   strokeMultiOffset(g, points, theme, w, h, now, state.audio.beatPulse || 0);
 }
 
+const cosmos = { rings: [], lastT: 0 };
+
+function drawCosmos(g, analyser, theme, w, h) {
+  if (!analyser) return;
+  const raw = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(raw);
+  const now = performance.now() / 1000;
+  const dt = cosmos.lastT ? Math.min(0.05, now - cosmos.lastT) : 0.016;
+  cosmos.lastT = now;
+
+  const a = state.audio || {};
+  const speed = 0.15 + (a.bassAtt || 0) * 0.6;
+  const fov = Math.min(w, h) * (0.18 + (a.mid || 0) * 0.04);
+  for (const r of cosmos.rings) r.depth += speed * dt;
+  cosmos.rings = cosmos.rings.filter(r => r.depth < 1.2);
+  if (cosmos.rings.length < 15 && (cosmos.rings.length === 0 ||
+      cosmos.rings[cosmos.rings.length - 1].depth > 0.12)) {
+    cosmos.rings.push({ depth: 0.02 });
+  }
+  if (a.beat) cosmos.rings.push({ depth: 0.02, warp: true });
+
+  const cx = w / 2, cy = h / 2;
+  const VG = window.ViewGeometry, PC = window.PaletteColor;
+  for (const r of cosmos.rings) {
+    const t = Math.max(0, Math.min(1, r.depth));
+    const scale = 0.1 + t * 4.0;
+    const pts = VG.ringDeform(raw, { cx, cy, baseR: fov, amp: fov * 0.5, scale, nPoints: 96 });
+    const color = PC ? PC.colorAt(theme, t) : theme.fg;
+    g.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
+    g.stroke({ color, width: r.warp ? theme.lineWidth * 2 : theme.lineWidth, alpha: r.warp ? 1 : 0.5 + t * 0.5 });
+  }
+}
+
+const grove = { leaves: null };
+
+function drawGrove(g, analyser, theme, w, h) {
+  if (!analyser) return;
+  const raw = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(raw);
+  const N = 64, edge = new Float32Array(N);
+  for (let i = 0; i < N; i++) edge[i] = raw[Math.floor((i / N) * raw.length)];
+
+  const a = state.audio || {};
+  const VG = window.ViewGeometry, PC = window.PaletteColor;
+  const baseY = h * 0.42;
+  const poly = VG.canopyEdge(edge, { w, h, baseY, amp: h * 0.12 * (1 + (a.bassAtt || 0)) });
+
+  const foliage = PC ? PC.colorAt(theme, 0.45) : theme.fg;
+  g.moveTo(poly[0][0], poly[0][1]);
+  for (let i = 1; i < poly.length; i++) g.lineTo(poly[i][0], poly[i][1]);
+  g.closePath();
+  g.fill({ color: foliage, alpha: 0.85 });
+
+  // Trunks at a fixed 20/40/60/80% spread (intentional even spacing).
+  const bark = PC ? PC.colorAt(theme, 0.18) : theme.fg;
+  for (let i = 1; i <= 4; i++) {
+    const x = (i / 5) * w;
+    const yTop = baseY - edge[Math.floor((i / 5) * N)] * h * 0.12;
+    g.moveTo(x, yTop); g.lineTo(x, h);
+    g.stroke({ color: bark, width: 6, alpha: 0.9 });
+  }
+
+  if (!grove.leaves && window.Particles) grove.leaves = window.Particles.createParticleField(40);
+  if (grove.leaves) {
+    // clamp per-frame spawns so a treb spike can't replace the whole field in
+    // one frame; field capacity (40) is the hard ceiling.
+    const spawnN = Math.min(6, Math.round((a.treb || 0) * 3) + (a.beat ? 8 : 0));
+    for (let i = 0; i < spawnN; i++) {
+      grove.leaves.spawn({ x: Math.random() * w, y: baseY, vx: (Math.random() - 0.5) * 30,
+        vy: 20 + Math.random() * 40, life: 2 + Math.random() * 2, t: 0.6 + Math.random() * 0.4 });
+    }
+    grove.leaves.update(0.016);
+    for (const p of grove.leaves.alive()) {
+      g.circle(p.x, p.y, 3).fill({ color: PC ? PC.colorAt(theme, p.t) : theme.fg,
+        alpha: Math.max(0, 1 - p.age / p.life) });
+    }
+  }
+}
+
+const firebird = { sparks: null };
+
+function drawFirebird(g, analyserL, analyserR, theme, w, h) {
+  if (!analyserL || !analyserR) return;
+  const n = analyserL.fftSize;
+  const L = new Float32Array(n), R = new Float32Array(n);
+  analyserL.getFloatTimeDomainData(L);
+  analyserR.getFloatTimeDomainData(R);
+  const M = 48, dL = new Float32Array(M), dR = new Float32Array(M);
+  for (let i = 0; i < M; i++) { const k = Math.floor((i / M) * n); dL[i] = L[k]; dR[i] = R[k]; }
+
+  const a = state.audio || {};
+  const VG = window.ViewGeometry, PC = window.PaletteColor;
+  const cx = w / 2, cy = h * 0.55;
+  const thrust = 1 + (a.bassAtt || 0) * 0.8;
+  const spread = (0.18 + (a.mid || 0) * 0.06) * Math.min(w, h) * (a.beat ? 1.5 : 1);
+  const { left, right } = VG.wingFromLissajous(dL, dR, { cx, cy, scale: spread });
+
+  // flame body + tail: a vertical column from above the core down past it,
+  // coloured core (white-hot) -> ember at the tail tip.
+  const bodyTop = cy - 60 * thrust, tailBot = cy + 70 * thrust;
+  g.moveTo(cx, bodyTop); g.lineTo(cx, tailBot);
+  g.stroke({ color: PC ? PC.colorAt(theme, 0.55) : theme.fg, width: 8, alpha: 0.85 });
+
+  const drawWing = (pts) => {
+    g.moveTo(cx, cy);
+    for (const [x, y] of pts) g.lineTo(x, y * thrust + cy * (1 - thrust));
+    g.stroke({ color: PC ? PC.colorAt(theme, 0.2) : theme.fg, width: theme.lineWidth, alpha: 0.9 });
+  };
+  drawWing(right);
+  drawWing(left);
+  g.circle(cx, cy - 20 * thrust, 10).fill({ color: PC ? PC.colorAt(theme, 0.98) : theme.fg });
+
+  if (!firebird.sparks && window.Particles) firebird.sparks = window.Particles.createParticleField(100);
+  if (firebird.sparks) {
+    const tipR = right[right.length - 1], tipL = left[left.length - 1];
+    // clamp per-frame spawns so a beat/treb spike can't flush the field in one
+    // frame; field capacity (100) is the hard ceiling.
+    const spawnN = Math.min(10, Math.round((a.treb || 0) * 4) + (a.beat ? 16 : 0));
+    for (let i = 0; i < spawnN; i++) {
+      const tip = i % 2 ? tipR : tipL;
+      firebird.sparks.spawn({ x: tip[0], y: tip[1], vx: (Math.random() - 0.5) * 60,
+        vy: -40 - Math.random() * 60, life: 0.6 + Math.random() * 0.6, t: 0.5 + Math.random() * 0.5 });
+    }
+    firebird.sparks.update(0.016);
+    for (const p of firebird.sparks.alive()) {
+      g.circle(p.x, p.y, 2).fill({ color: PC ? PC.colorAt(theme, p.t) : theme.fg,
+        alpha: Math.max(0, 1 - p.age / p.life) });
+    }
+  }
+}
+
 // Fetch the native app version once and fill any present version labels
 // (TV bottom-right, phone settings drawer). Blank in a browser with no plugin.
 async function loadVersionLabels() {
@@ -1454,6 +1637,13 @@ async function init() {
     themes.mono.filters = [
       new PIXI.BlurFilter({ strength: 2, quality: 2 }),
     ];
+
+    // Bake palette ramps into RGB LUTs (one-time; re-baked per minute by the
+    // tempo tick in the frame loop). Multi-stop ramps only; 1-stop are mono.
+    if (window.PaletteColor) {
+      for (const key of Object.keys(themes)) window.PaletteColor.bakeRamp(themes[key], 0);
+    }
+    if (window.AudioFeatures) state.tempo = window.AudioFeatures.createTempoTracker();
 
     // Apply default theme to trailSprite so the first frame already has filters.
     pixi.trailSprite.filters = themes[state.theme].filters;
@@ -1661,8 +1851,11 @@ async function init() {
         if (state.channels === 1) return;
         state.view = "lissajous"; applyState();
       }
+      if (e.key === "4") { state.view = "cosmos";   applyState(); }
+      if (e.key === "5") { state.view = "grove";    applyState(); }
+      if (e.key === "6") { state.view = "firebird"; applyState(); }
       if (e.key === "t" || e.key === "T") {
-        const order = ["crt", "neon", "mono"];
+        const order = ["crt", "neon", "mono", "nebula", "verdant", "ember"];
         const idx = order.indexOf(state.theme);
         state.theme = order[(idx + 1) % order.length];
         applyState();

@@ -15,8 +15,8 @@
     //   1024 -> "1", 2048 -> "2", 16384 -> "16".
     return (n / 1024).toString() + "k";
   }
-  const VIEWS = ["waveform", "spectrum", "lissajous"];
-  const VIEW_LABELS = { waveform: "Waveform", spectrum: "Spectrum", lissajous: "Lissajous" };
+  const VIEWS = ["waveform", "spectrum", "lissajous", "cosmos", "grove", "firebird"];
+  const VIEW_LABELS = { waveform: "Waveform", spectrum: "Spectrum", lissajous: "Lissajous", cosmos: "Cosmos", grove: "Grove", firebird: "Firebird" };
 
   let toastTimer = null;
 

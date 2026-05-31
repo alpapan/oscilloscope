@@ -48,25 +48,28 @@ test("phone-side tvConnected listener also pushes initial mirror-state", () => {
 
 test("sendPhoneMirror helper sends type:mirror-state with numeric view", () => {
   const js = read("main.js");
-  // Helper must encode view as numeric 0|1|2 (matching sendTvRenderRequest's convention).
-  assert.match(js, /function\s+sendPhoneMirror[\s\S]{0,400}?state\.view\s*===\s*["']spectrum["']\s*\?\s*1\s*:\s*state\.view\s*===\s*["']lissajous["']\s*\?\s*2\s*:\s*0/);
+  // Helper must encode view as numeric 0|1|2|3|4|5 (matching sendTvRenderRequest's convention).
+  assert.match(js, /function\s+sendPhoneMirror[\s\S]{0,400}?state\.view\s*===\s*["']spectrum["']\s*\?\s*1\s*:\s*state\.view\s*===\s*["']lissajous["']\s*\?\s*2\s*:\s*state\.view\s*===\s*["']cosmos["']\s*\?\s*3\s*:\s*state\.view\s*===\s*["']grove["']\s*\?\s*4\s*:\s*state\.view\s*===\s*["']firebird["']\s*\?\s*5\s*:\s*0/);
   assert.match(js, /function\s+sendPhoneMirror[\s\S]{0,400}?type:\s*["']mirror-state["']/);
 });
 
 test("startTvMode registers a tvRenderRequest listener that handles mirror-state", () => {
   const js = read("main.js");
   // The listener must update state.view + state.theme on mirror-state and call applyState.
-  assert.match(js, /addListener\("tvRenderRequest"[\s\S]{0,800}?type\s*===\s*["']mirror-state["'][\s\S]{0,400}?state\.view\s*=[\s\S]{0,200}?state\.theme\s*=[\s\S]{0,200}?applyState\(\)/);
+  // Bounds widened 200 -> 400 between view/theme/applyState: the 6-view numeric
+  // decode and 6-palette whitelist made the correct code longer than the old
+  // tight window (same rationale as the wireTvRemote bound widening below).
+  assert.match(js, /addListener\("tvRenderRequest"[\s\S]{0,800}?type\s*===\s*["']mirror-state["'][\s\S]{0,400}?state\.view\s*=[\s\S]{0,400}?state\.theme\s*=[\s\S]{0,400}?applyState\(\)/);
 });
 
 test("tvRenderRequest listener validates theme against known palette set", () => {
   const js = read("main.js");
-  assert.match(js, /\["crt",\s*"neon",\s*"mono"\]\.includes/);
+  assert.match(js, /\["crt",\s*"neon",\s*"mono",\s*"nebula",\s*"verdant",\s*"ember"\]\.includes/);
 });
 
 test("tvRenderRequest listener maps numeric view back to string for state.view", () => {
   const js = read("main.js");
-  assert.match(js, /view\s*===\s*1\s*\?\s*["']spectrum["']\s*:\s*view\s*===\s*2\s*\?\s*["']lissajous["']\s*:\s*["']waveform["']/);
+  assert.match(js, /view\s*===\s*1\s*\?\s*["']spectrum["']\s*:\s*view\s*===\s*2\s*\?\s*["']lissajous["']\s*:\s*view\s*===\s*3\s*\?\s*["']cosmos["']\s*:\s*view\s*===\s*4\s*\?\s*["']grove["']\s*:\s*view\s*===\s*5\s*\?\s*["']firebird["']\s*:\s*["']waveform["']/);
 });
 
 test("tvRenderRequest listener wraps JSON.parse in try/catch", () => {
@@ -82,7 +85,15 @@ test("wireTvRemote D-pad checks state.paired before deciding routing", () => {
 
 test("wireTvRemote computes newView from a local order array for the round-trip", () => {
   const js = read("main.js");
-  assert.match(js, /const\s+order\s*=\s*\["waveform",\s*"spectrum",\s*"lissajous"\]/);
+  assert.match(js, /const\s+order\s*=\s*\["waveform",\s*"spectrum",\s*"lissajous",\s*"cosmos",\s*"grove",\s*"firebird"\]/);
+});
+
+test("wireTvRemote encodes the cycled view numerically for all six views", () => {
+  // The remote round-trip maps `next` -> numeric view; it must cover cosmos/
+  // grove/firebird (3/4/5) in lockstep with the other numeric encode sites,
+  // or remote-cycling to a new view silently requests waveform from the phone.
+  const js = read("main.js");
+  assert.match(js, /next\s*===\s*["']spectrum["']\s*\?\s*1\s*:\s*next\s*===\s*["']lissajous["']\s*\?\s*2\s*:\s*next\s*===\s*["']cosmos["']\s*\?\s*3\s*:\s*next\s*===\s*["']grove["']\s*\?\s*4\s*:\s*next\s*===\s*["']firebird["']\s*\?\s*5\s*:\s*0/);
 });
 
 test("wireTvRemote unpaired branch still calls MobileUI.cycleView (fallback)", () => {
@@ -100,7 +111,9 @@ test("phoneViewRequest listener maps numeric view back to string and calls apply
   assert.match(js, /addListener\("phoneViewRequest"[\s\S]{0,600}?state\.view\s*=[\s\S]{0,200}?applyState\(\)/);
 });
 
-test("phoneViewRequest listener validates view value 0|1|2", () => {
+test("phoneViewRequest listener admits all six numeric views (0..5)", () => {
+  // The validation gate must admit 0..5; a [0,1,2]-only gate silently drops
+  // remote-cycled cosmos/grove/firebird (3/4/5) so the phone never switches.
   const js = read("main.js");
-  assert.match(js, /addListener\("phoneViewRequest"[\s\S]{0,600}?(view\s*===\s*1\s*\?|\[0,\s*1,\s*2\]\.includes)/);
+  assert.match(js, /addListener\("phoneViewRequest"[\s\S]{0,600}?\[0,\s*1,\s*2,\s*3,\s*4,\s*5\]\.includes\(view\)/);
 });

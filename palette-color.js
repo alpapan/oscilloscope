@@ -58,9 +58,60 @@ function currentColor(palette, time, beatPulse) {
   return hsvToRgbInt(h + cycleDeg + beatDeg, s, v);
 }
 
+// --- OKLCH -> sRGB (Björn Ottosson). L 0-1, C ~0-0.4, h degrees. ---
+function oklchToRgbInt(L, C, h) {
+  const rad = (h * Math.PI) / 180;
+  const a = C * Math.cos(rad), b = C * Math.sin(rad);
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+  const l = l_ ** 3, m = m_ ** 3, s = s_ ** 3;
+  const lr = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+  const lg = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+  const lb = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+  const enc = (v) => {
+    if (v <= 0) return 0;
+    if (v >= 1) return 255;
+    const s2 = v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055;
+    return Math.round(Math.max(0, Math.min(1, s2)) * 255);
+  };
+  return (enc(lr) << 16) | (enc(lg) << 8) | enc(lb);
+}
+
+// Bake the palette's OKLCH ramp into a 256-entry packed-RGB LUT, with an
+// absolute hueOffsetDeg added to every stop (tempo mapping). A ramp of < 2
+// stops is monochrome: the LUT is left null and colorAt returns fg.
+function bakeRamp(palette, hueOffsetDeg = 0) {
+  const ramp = palette.ramp || [];
+  if (ramp.length < 2) { palette._lut = null; return; }
+  const lut = new Uint32Array(256);
+  const segs = ramp.length - 1;
+  for (let j = 0; j < 256; j++) {
+    const t = j / 255;
+    const f = t * segs;
+    const i = Math.min(segs - 1, Math.floor(f));
+    const u = f - i;
+    const a = ramp[i], b = ramp[i + 1];
+    // shortest-path hue lerp: (delta+540)%360-180 maps to [-180,180] so a
+    // stop at h=10 and next at h=350 lerp via -20 deg, not +340.
+    const dh = ((b.h - a.h + 540) % 360) - 180;
+    const L = a.L + (b.L - a.L) * u;
+    const C = a.C + (b.C - a.C) * u;
+    const h = a.h + dh * u + hueOffsetDeg;
+    lut[j] = oklchToRgbInt(L, C, h);
+  }
+  palette._lut = lut;
+}
+
+function colorAt(palette, t) {
+  if (!palette._lut) return palette.fg;
+  const j = Math.max(0, Math.min(255, Math.round(t * 255)));
+  return palette._lut[j];
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { currentColor, HUE_CYCLE_FREQ };
+  module.exports = { currentColor, HUE_CYCLE_FREQ, oklchToRgbInt, bakeRamp, colorAt };
 }
 if (typeof globalThis !== "undefined") {
-  globalThis.PaletteColor = { currentColor, HUE_CYCLE_FREQ };
+  globalThis.PaletteColor = { currentColor, HUE_CYCLE_FREQ, oklchToRgbInt, bakeRamp, colorAt };
 }

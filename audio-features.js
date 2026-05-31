@@ -131,6 +131,35 @@ function createAudioAnalysis({ analyserL, sampleRate, fftSize }) {
   return { update };
 }
 
+// Tempo tracker: average BPM over a trailing window of inter-beat intervals.
+// Pure: caller passes a monotonic-ms timestamp to beat().
+function createTempoTracker(windowMs = 60000) {
+  const intervals = [];
+  let lastBeatMs = null;
+  function beat(nowMs) {
+    if (lastBeatMs !== null) {
+      const ms = nowMs - lastBeatMs;
+      if (ms > 0) intervals.push({ at: nowMs, ms });
+    }
+    lastBeatMs = nowMs;
+    while (intervals.length && nowMs - intervals[0].at > windowMs) intervals.shift();
+  }
+  function avgBpm() {
+    if (!intervals.length) return 40;
+    let s = 0;
+    for (const it of intervals) s += it.ms;
+    const bpm = 60000 / (s / intervals.length);
+    return Math.max(40, Math.min(200, bpm));
+  }
+  return { beat, avgBpm };
+}
+
+// Stateless, deterministic tempo -> absolute hue offset in degrees.
+function bpmToHueDeg(avgBpm) {
+  const b = Math.max(40, Math.min(200, avgBpm));
+  return ((b - 40) / 160) * 360;
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     pcmSmooth,
@@ -138,6 +167,8 @@ if (typeof module !== "undefined" && module.exports) {
     createLoudnessTracker,
     createBeatDetector,
     createAudioAnalysis,
+    createTempoTracker,
+    bpmToHueDeg,
   };
 }
 if (typeof globalThis !== "undefined") {
@@ -147,5 +178,7 @@ if (typeof globalThis !== "undefined") {
     createLoudnessTracker,
     createBeatDetector,
     createAudioAnalysis,
+    createTempoTracker,
+    bpmToHueDeg,
   };
 }
