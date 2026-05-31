@@ -1444,7 +1444,7 @@ async function init() {
     // any preceding bloom/glow halos rather than being re-sharpened by them.
     themes.crt.filters = [
       new PIXI.filters.GlowFilter({ distance: 8, outerStrength: 1.5, color: 0x33ff66 }),
-      new PIXI.filters.CRTFilter({ curvature: 1, lineWidth: 1, vignetting: 0.3 }),
+      new PIXI.filters.CRTFilter({ curvature: 1, lineWidth: 1, vignetting: 0 }),
       new PIXI.BlurFilter({ strength: 2, quality: 2 }),
     ];
     themes.neon.filters = [
@@ -1536,19 +1536,36 @@ async function init() {
       window.cycleView = function (direction) {
         MobileUI.cycleView(direction, state, applyState);
       };
-      // Capacitor App backButton: drawer-close > stop-capture > confirm-exit.
-      // Android 14+ edge-swipes commit to back-gesture early, so users
-      // attempting to swipe-from-right to open the settings drawer can
-      // accidentally trigger this. Show a confirmation banner before
-      // committing to exit so an unintended swipe is recoverable.
+      // Capacitor App backButton: privacy-overlay > drawer-close > block-during-capture > confirm-exit.
+      // The Android 14+ system back-gesture (edge swipe from the screen
+      // edge) dispatches as this event. Priority:
+      //   1. Privacy overlay open -> dismiss it.
+      //   2. Settings drawer open -> close it.
+      //   3. Capture is running with drawer + overlay both closed ->
+      //      SILENT NO-OP. The edge swipe must not exit and must not
+      //      stop capture; an accidental swipe while watching the
+      //      visualisation would otherwise interrupt the session.
+      //      Explicit Stop is reachable via the drawer's Stop button
+      //      and the foreground-service notification's Stop action.
+      //      Explicit Exit is reachable via the drawer's Exit button.
+      //   4. No capture running (start screen) -> confirm-exit dialog.
       if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
         window.Capacitor.Plugins.App.addListener("backButton", () => {
+          const overlay = document.getElementById("privacy-overlay");
+          if (overlay && !overlay.classList.contains("hidden")) {
+            if (typeof window.closePrivacyOverlay === "function") {
+              window.closePrivacyOverlay();
+            } else {
+              overlay.classList.add("hidden");
+            }
+            return;
+          }
           if (MobileUI.isDrawerOpen()) {
             MobileUI.closeDrawer();
             return;
           }
           if (state.running) {
-            stopCapture();
+            // Block the edge-swipe during active capture. Do nothing.
             return;
           }
           // Use the native modal confirm so the exit prompt is unambiguously

@@ -4,13 +4,16 @@
 (function () {
   if (typeof window === "undefined") return;
 
-  const FFT_VALUES = [512, 1024, 2048, 4096, 8192, 16384];
+  const FFT_VALUES = [128, 256, 512, 1024, 2048, 4096, 8192, 16384];
 
   // Render the integer fftSize as a "k"-shorthand label for the mobile picker
-  // (matches the desktop <select> options at index.html:52-58). e.g. 512 -> "0.5k", 2048 -> "2k".
+  // (matches the desktop <select> options in index.html).
+  // 128 -> "0.125k", 256 -> "0.25k", 512 -> "0.5k", 2048 -> "2k".
   function fftSizeLabel(n) {
-    if (n < 1024) return "0.5k";
-    return (n / 1024) + "k";
+    // (n / 1024).toString() drops trailing zeros for clean labels:
+    //   128 -> "0.125", 256 -> "0.25", 512 -> "0.5",
+    //   1024 -> "1", 2048 -> "2", 16384 -> "16".
+    return (n / 1024).toString() + "k";
   }
   const VIEWS = ["waveform", "spectrum", "lissajous"];
   const VIEW_LABELS = { waveform: "Waveform", spectrum: "Spectrum", lissajous: "Lissajous" };
@@ -168,19 +171,50 @@
     }
     // Privacy-policy overlay toggle. Same-page overlay (no navigation),
     // so the AudioWorklet keeps running while the user reads the policy.
+    // Dismissal: bottom Close button, top-right X, system back-gesture
+    // (handled in main.js's backButton listener), or a left-to-right
+    // swipe across the overlay surface (mirrors the drawer's
+    // swipe-LTR-on-backdrop pattern).
     const privacyBtn = document.getElementById("mobile-privacy");
     const privacyOverlay = document.getElementById("privacy-overlay");
     const privacyCloseBtn = document.getElementById("privacy-close");
+    const privacyCloseX = document.getElementById("privacy-close-x");
+    function closePrivacyOverlay() {
+      if (privacyOverlay) privacyOverlay.classList.add("hidden");
+    }
+    // Expose so main.js's backButton listener can dismiss the overlay
+    // at top priority without re-grepping the DOM each press.
+    window.closePrivacyOverlay = closePrivacyOverlay;
     if (privacyBtn && privacyOverlay) {
       privacyBtn.addEventListener("click", () => {
         privacyOverlay.classList.remove("hidden");
         closeDrawer();
       });
     }
-    if (privacyCloseBtn && privacyOverlay) {
-      privacyCloseBtn.addEventListener("click", () => {
-        privacyOverlay.classList.add("hidden");
-      });
+    if (privacyCloseBtn) {
+      privacyCloseBtn.addEventListener("click", closePrivacyOverlay);
+    }
+    if (privacyCloseX) {
+      privacyCloseX.addEventListener("click", closePrivacyOverlay);
+    }
+    if (privacyOverlay) {
+      // Swipe LTR across the overlay closes it. Reuses the same
+      // classifySwipe helper the canvas/backdrop gestures use.
+      let px0 = 0, py0 = 0;
+      privacyOverlay.addEventListener("touchstart", (e) => {
+        const t = e.changedTouches[0];
+        px0 = t.clientX; py0 = t.clientY;
+      }, { passive: true });
+      privacyOverlay.addEventListener("touchend", (e) => {
+        const t = e.changedTouches[0];
+        const dx = t.clientX - px0;
+        const dy = t.clientY - py0;
+        const dir = window.classifySwipe(px0, py0, dx, dy, {
+          x0: px0,
+          canvasWidth: window.innerWidth,
+        });
+        if (dir === "right") closePrivacyOverlay();
+      }, { passive: true });
     }
     const exitBtn = document.getElementById("mobile-exit");
     if (exitBtn) {

@@ -37,3 +37,11 @@ CLAUDE.md
 docs/evidence/
 docs/plans/
 docs/superpowers/specs/
+
+# Google Play submission scratch artefacts - kept local, never committed.
+# play-listing/ holds screenshots, feature graphic, TV banner, etc.
+# that get uploaded to the Play Console rather than living in the
+# source tree. docs/privacy-policy.md is intentionally NOT ignored -
+# it is the one Play document the public Play listing links to and
+# therefore needs a public URL in this repo.
+play-listing/

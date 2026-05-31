@@ -622,3 +622,22 @@ body.pre-capture #mobile-stop { display: none; }
   font-size: 16px;
   cursor: pointer;
 }
+
+/* Top-right X close button. Pinned inside the safe-area padding so the
+   tap surface is reachable on notched devices. Sized at 48x48 to meet
+   the 44pt touch-target floor; uses the themed --fg / --bg colours. */
+.overlay-close-x {
+  position: absolute;
+  top: max(8px, env(safe-area-inset-top));
+  right: max(8px, env(safe-area-inset-right));
+  min-height: 48px;
+  min-width: 48px;
+  background: var(--bg, #000);
+  color: var(--fg, #33ff66);
+  border: 1px solid var(--fg, #33ff66);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 1;
+}
+.overlay-close-x:active { opacity: 0.6; }

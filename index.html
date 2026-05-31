@@ -53,6 +53,8 @@
       <summary>Advanced</summary>
       <label>Detail
         <select id="fft">
+          <option value="128">0.125k</option>
+          <option value="256">0.25k</option>
           <option value="512">0.5k</option>
           <option value="1024">1k</option>
           <option value="2048" selected>2k</option>
@@ -105,6 +107,8 @@
        Kept in lockstep with docs/privacy-policy.md. -->
   <div id="privacy-overlay" class="overlay hidden" role="dialog"
        aria-labelledby="privacy-title" aria-modal="true">
+    <button type="button" id="privacy-close-x" class="overlay-close-x"
+            aria-label="Close privacy policy">&#x2715;</button>
     <div class="overlay-card">
       <h1 id="privacy-title">Privacy policy</h1>
       <p><strong>Effective date:</strong> 2026-05-31</p>
