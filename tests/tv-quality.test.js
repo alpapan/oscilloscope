@@ -49,3 +49,21 @@ test("drawLissajous branches on state.tvMode to skip phone-side prep already don
   // Same as drawWaveform: phone already smoothed both channels.
   assert.match(js, /function\s+drawLissajous[\s\S]{0,800}?if\s*\(\s*state\.tvMode\s*\)/);
 });
+
+test("mobile-ui.js FFT_VALUES uses the same six values as the desktop select (drops 256 and 32768)", () => {
+  const js = read("mobile-ui.js");
+  assert.match(js, /FFT_VALUES\s*=\s*\[\s*512\s*,\s*1024\s*,\s*2048\s*,\s*4096\s*,\s*8192\s*,\s*16384\s*\]/);
+});
+
+test("mobile-ui.js renders fftSize as a k-label in the mobile picker", () => {
+  const js = read("mobile-ui.js");
+  // The mobile picker's value span must display "0.5k"/"1k"/.../"16k" not the raw integer.
+  // Look for either a helper function or a map literal that translates 2048 -> "2k" etc.
+  assert.match(js, /\b(?:fftSizeLabel|kLabel|fftKLabel)\s*\(/);
+});
+
+test("index.html mobile-fft-value default text matches the default state.fftSize as k-label", () => {
+  const html = read("index.html");
+  // Default fftSize is 2048 = "2k". The static placeholder text in the span should match.
+  assert.match(html, /<span id="mobile-fft-value">2k<\/span>/);
+});

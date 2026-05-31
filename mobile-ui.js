@@ -4,7 +4,14 @@
 (function () {
   if (typeof window === "undefined") return;
 
-  const FFT_VALUES = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768];
+  const FFT_VALUES = [512, 1024, 2048, 4096, 8192, 16384];
+
+  // Render the integer fftSize as a "k"-shorthand label for the mobile picker
+  // (matches the desktop <select> options at index.html:52-58). e.g. 512 -> "0.5k", 2048 -> "2k".
+  function fftSizeLabel(n) {
+    if (n < 1024) return "0.5k";
+    return (n / 1024) + "k";
+  }
   const VIEWS = ["waveform", "spectrum", "lissajous"];
   const VIEW_LABELS = { waveform: "Waveform", spectrum: "Spectrum", lissajous: "Lissajous" };
 
@@ -50,7 +57,7 @@
       gain.disabled = !!state.autoGain;
     }
     const fftSpan = document.getElementById("mobile-fft-value");
-    if (fftSpan) fftSpan.textContent = state.fftSize;
+    if (fftSpan) fftSpan.textContent = fftSizeLabel(state.fftSize);
     const smooth = document.getElementById("mobile-smooth");
     if (smooth) smooth.value = state.smoothing;
     const auto = document.getElementById("mobile-autogain");
