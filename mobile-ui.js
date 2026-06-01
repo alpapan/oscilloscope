@@ -17,8 +17,8 @@
   }
   const VIEWS = (typeof window !== "undefined" && window.ViewIds)
     ? window.ViewIds.VIEW_ORDER.slice()
-    : ["waveform","spectrum","lissajous","cosmos","grove","firebird","spiral","bloom","lasso","starburst","nova"];
-  const VIEW_LABELS = { waveform: "Waveform", spectrum: "Spectrum", lissajous: "Lissajous", cosmos: "Cosmos", grove: "Grove", firebird: "Firebird", spiral: "Spiral", bloom: "Bloom", lasso: "Lasso", starburst: "Starburst", nova: "Nova" };
+    : ["waveform","spectrum","lissajous","cosmos","grove","firebird","spiral","bloom","lasso","starburst","nova","nowplaying"];
+  const VIEW_LABELS = { waveform: "Waveform", spectrum: "Spectrum", lissajous: "Lissajous", cosmos: "Cosmos", grove: "Grove", firebird: "Firebird", spiral: "Spiral", bloom: "Bloom", lasso: "Lasso", starburst: "Starburst", nova: "Nova", nowplaying: "Now Playing" };
 
   let toastTimer = null;
 

@@ -5,7 +5,10 @@ const EXCLUSIVE = {
   cosmos: "nebula", grove: "verdant", firebird: "ember",
   spiral: "vortex", bloom: "orchid", lasso: "voltage", starburst: "supernova", nova: "plasma",
 };
-function eligiblePalettes(view) { return [...GENERIC, EXCLUSIVE[view]]; }
+function eligiblePalettes(view) {
+  const ex = EXCLUSIVE[view];
+  return ex ? [...GENERIC, ex] : [...GENERIC];
+}
 function nextPalette(view, current, dir) {
   const set = eligiblePalettes(view);
   const i = set.indexOf(current);
@@ -13,9 +16,10 @@ function nextPalette(view, current, dir) {
   return set[(i + dir + set.length) % set.length];
 }
 function reconcileTheme(view, theme) {
+  const ex = EXCLUSIVE[view];
   if (GENERIC.includes(theme)) return theme;
-  if (theme === EXCLUSIVE[view]) return theme;
-  return EXCLUSIVE[view];
+  if (ex && theme === ex) return theme;
+  return ex || GENERIC[0];
 }
 function isExclusive(theme) { return Object.values(EXCLUSIVE).includes(theme); }
 

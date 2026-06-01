@@ -1,6 +1,6 @@
 {
   "name": "scope",
-  "version": "0.5",
+  "version": "0.6",
   "private": true,
   "description": "Scope music oscilloscope - Android + Electron + browser",
   "main": "electron/main.js",

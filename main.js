@@ -143,6 +143,7 @@ const state = {
   androidImmersive: false,
   tvMode: false,          // ON when running as the leanback TV receiver
   paired: false,          // ON when this device is the partner of a paired TV/phone
+  nowPlaying: null,       // {title,artist,album,art} when a track is advertised, else null
 };
 function setRunning(val) {
   state.running = !!val;
@@ -609,6 +610,7 @@ async function startCaptureAndroid() {
     audio.silentCaptureHandle = await plugin.addListener("silentCapture", onSilentCapture);
     audio.unrestrictedHandle = await plugin.addListener("unrestrictedAvailable", onUnrestrictedAvailable);
     audio.captureLostHandle = await plugin.addListener("captureLost", onCaptureLost);
+    audio.nowPlayingHandle = await plugin.addListener("nowPlayingChanged", onNowPlayingChanged);
   } catch (err) {
     setStatus(`Graph wire-up failed: ${err.message || err}`);
     if (audio.ctx) { try { await audio.ctx.close(); } catch (_e) {} audio.ctx = null; }
@@ -794,6 +796,112 @@ function hideCaptureBanner() {
   if (el) el.hidden = true;
 }
 
+// ---- Now-playing readout: transient overlay (10s) + dedicated card. DOM only.
+let nowPlayingOverlayTimer = null;
+let nowPlayingAccessGranted = false;
+const NOW_PLAYING_OVERLAY_MS = 10000;
+
+function renderNowPlayingInto(el, dto) {
+  el.textContent = "";
+  const fmt = window.NowPlaying.formatTrackText(dto);
+  if (dto && dto.art) {
+    const img = document.createElement("img");
+    img.className = "np-art";
+    img.src = "data:image/jpeg;base64," + dto.art;
+    img.alt = "";
+    el.appendChild(img);
+  }
+  const text = document.createElement("div");
+  text.className = "np-text";
+  const title = document.createElement("div");
+  title.className = "np-title";
+  title.textContent = window.NowPlaying.truncate(fmt.title, 60);
+  text.appendChild(title);
+  for (const line of fmt.lines) {
+    const d = document.createElement("div");
+    d.className = "np-line";
+    d.textContent = window.NowPlaying.truncate(line, 60);
+    text.appendChild(d);
+  }
+  el.appendChild(text);
+}
+
+function showNowPlayingOverlay(dto) {
+  if (state.view === "nowplaying") return;   // the card already shows it
+  let el = document.getElementById("now-playing-overlay");
+  if (!el) { el = document.createElement("div"); el.id = "now-playing-overlay"; document.body.appendChild(el); }
+  renderNowPlayingInto(el, dto);
+  el.hidden = false;
+  requestAnimationFrame(() => el.classList.add("np-show"));
+  if (nowPlayingOverlayTimer) clearTimeout(nowPlayingOverlayTimer);
+  nowPlayingOverlayTimer = setTimeout(() => {
+    el.classList.remove("np-show");
+    setTimeout(() => { el.hidden = true; }, 600);
+  }, NOW_PLAYING_OVERLAY_MS);
+}
+
+function renderNowPlayingAccessPrompt(el) {
+  el.textContent = "";
+  const wrap = document.createElement("div");
+  wrap.className = "np-prompt";
+  const p = document.createElement("p");
+  p.textContent = "Scope can show the track playing in other apps. It reads media-session info only, never other notification content, and nothing leaves your network.";
+  const btn = document.createElement("button");
+  btn.className = "np-grant";
+  btn.textContent = "Grant notification access";
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();   // do not let the tap also fire a canvas gesture
+    try { await window.Capacitor?.Plugins?.ScopeAudio?.openNotificationAccessSettings(); } catch (_e) {}
+  });
+  wrap.appendChild(p);
+  wrap.appendChild(btn);
+  el.appendChild(wrap);
+}
+
+function updateNowPlayingCard() {
+  let el = document.getElementById("now-playing-card");
+  if (!el) { el = document.createElement("div"); el.id = "now-playing-card"; document.body.appendChild(el); }
+  if (state.view !== "nowplaying") { el.hidden = true; return; }
+  el.hidden = false;
+  const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
+  if (plugin && plugin.hasNotificationAccess && !nowPlayingAccessGranted) {
+    renderNowPlayingAccessPrompt(el);
+    return;
+  }
+  if (window.NowPlaying.isBlank(state.nowPlaying)) {
+    el.textContent = "";
+    const p = document.createElement("div");
+    p.className = "np-placeholder";
+    p.textContent = state.running ? "Nothing playing" : "Start capture to see track info";
+    el.appendChild(p);
+    return;
+  }
+  renderNowPlayingInto(el, state.nowPlaying);
+}
+
+async function refreshNowPlayingAccess() {
+  const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
+  if (!plugin || !plugin.hasNotificationAccess) { nowPlayingAccessGranted = false; return; }
+  try {
+    const r = await plugin.hasNotificationAccess();
+    nowPlayingAccessGranted = !!(r && r.granted);
+  } catch (_e) { nowPlayingAccessGranted = false; }
+  updateNowPlayingCard();
+}
+
+function ingestNowPlaying(dto) {
+  const prev = state.nowPlaying;
+  state.nowPlaying = window.NowPlaying.isBlank(dto) ? null : dto;
+  if (window.NowPlaying.isNewTrack(prev, dto)) showNowPlayingOverlay(dto);
+  updateNowPlayingCard();
+}
+
+function onNowPlayingChanged(e) {
+  ingestNowPlaying({
+    title: e.title || "", artist: e.artist || "", album: e.album || "", art: e.art || null,
+  });
+}
+
 async function stopCaptureAndroid(opts) {
   releaseScreenLock();
   setKeepScreenOnAndroid(false);
@@ -814,6 +922,12 @@ async function stopCaptureAndroid(opts) {
     await audio.captureLostHandle.remove();
     audio.captureLostHandle = null;
   }
+  if (audio.nowPlayingHandle && audio.nowPlayingHandle.remove) {
+    await audio.nowPlayingHandle.remove();
+    audio.nowPlayingHandle = null;
+  }
+  state.nowPlaying = null;
+  updateNowPlayingCard();
   const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
   if (plugin) {
     try { await plugin.stopCapture(); } catch (_e) {}
@@ -980,6 +1094,10 @@ async function startTvMode() {
   await plugin.addListener("tvRenderRequest", (e) => {
     let payload;
     try { payload = JSON.parse(e.json); } catch (_err) { return; }
+    if (payload && payload.type === "now-playing") {
+      ingestNowPlaying(payload);
+      return;
+    }
     if (payload && payload.type === "mirror-state") {   // forward-compat: unknown types ignored
       const { view, theme } = payload;
       state.view = window.ViewIds.idToView(view);
@@ -1204,6 +1322,8 @@ function applyState() {
   if (PLATFORM === "android" && window.MobileUI) {
     window.MobileUI.refreshDrawer(state);
   }
+  updateNowPlayingCard();
+  if (state.view === "nowplaying") refreshNowPlayingAccess();
 }
 
 let silentMs = 0;
@@ -1922,6 +2042,11 @@ async function init() {
           if (typeof window.confirm === "function" && window.confirm("Exit Scope?")) {
             window.Capacitor.Plugins.App.exitApp();
           }
+        });
+        // Re-check notification access when returning from the system Settings
+        // deep-link (the primary re-check is on view entry in applyState).
+        window.Capacitor.Plugins.App.addListener("appStateChange", (st) => {
+          if (st && st.isActive && state.view === "nowplaying") refreshNowPlayingAccess();
         });
       }
       return;

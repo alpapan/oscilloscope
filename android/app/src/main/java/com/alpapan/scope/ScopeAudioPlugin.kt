@@ -9,8 +9,10 @@ import android.content.res.Configuration
 import android.media.projection.MediaProjectionConfig
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.result.ActivityResult
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -174,6 +176,7 @@ class ScopeAudioPlugin : Plugin() {
         context.stopService(intent)
         AudioCaptureService.pluginRef = null
         isCapturing = false
+        emitNowPlayingCleared()
         (bridge?.activity as? MainActivity)?.let { act ->
             act.runOnUiThread { act.setPipAutoEnter(false) }
         }
@@ -278,6 +281,44 @@ class ScopeAudioPlugin : Plugin() {
         val tv = (context.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION ||
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
         call.resolve(JSObject().put("formFactor", if (tv) "tv" else "phone"))
+    }
+
+    @PluginMethod
+    fun hasNotificationAccess(call: PluginCall) {
+        val granted = try {
+            NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+        } catch (_: Throwable) { false }
+        call.resolve(JSObject().put("granted", granted))
+    }
+
+    @PluginMethod
+    fun openNotificationAccessSettings(call: PluginCall) {
+        try {
+            val i = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(i)
+        } catch (_: Throwable) {}
+        call.resolve()
+    }
+
+    /** Called by MediaMetadataService on a new track. Forwards to this phone's JS
+     *  and (if paired and capturing) to the TV. Gated on isCapturing so the readout
+     *  only appears while the scope is capturing. Works headless: this runs on the
+     *  native side, so the paired TV is updated even when the phone JS is backgrounded. */
+    fun emitNowPlaying(np: NowPlaying?) {
+        if (!isCapturing) return
+        val data = JSObject()
+            .put("title", np?.title ?: "")
+            .put("artist", np?.artist ?: "")
+            .put("album", np?.album ?: "")
+        if (np?.art != null) data.put("art", np.art)
+        notifyListeners("nowPlayingChanged", data)
+        if (np != null) sender.sendControl(NowPlayingLogic.encodeMessage(np))
+    }
+
+    private fun emitNowPlayingCleared() {
+        // Not gated on isCapturing: runs as capture stops, to clear the JS state.
+        notifyListeners("nowPlayingChanged", JSObject().put("title", "").put("artist", "").put("album", ""))
     }
 
     /** Phone: start NSD browse; each resolved TV is surfaced as a `tvFound` event. */
@@ -407,13 +448,14 @@ class ScopeAudioPlugin : Plugin() {
      *  the latest spec.fftSize samples, runs view-specific prep (smoothing +
      *  optional trigger for waveform), optionally downsamples for the wire,
      *  then hands to the sender's bounded queue. */
-    private fun makePcmTap(): (FloatArray, FloatArray?) -> Unit = { left, right ->
+    private fun makePcmTap(): (FloatArray, FloatArray?) -> Unit = tap@{ left, right ->
         val s = spec
         windowL.push(left)
         if (right != null) windowR.push(right)
         val winL = windowL.last(s.fftSize)
         val winR = if (s.channels == 2 && right != null) windowR.last(s.fftSize) else null
         val frame = when (s.view) {
+            11 -> return@tap                                                    // now-playing view: text-only card, event-driven; no per-frame frame
             1 -> {                                                              // spectrum: mono mix -> FFT dB on the window
                 val mono = FloatArray(winL.size) {
                     (winL[it] + (winR?.getOrElse(it) { winL[it] } ?: winL[it])) * 0.5f

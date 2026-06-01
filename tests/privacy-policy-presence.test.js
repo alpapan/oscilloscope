@@ -28,6 +28,18 @@ test('privacy policy markdown exists with the eight mandatory sections', () => {
   }
 });
 
+test('privacy policy discloses notification (media-session) access in both surfaces', () => {
+  // The in-app overlay (index.html) and the canonical markdown are kept in
+  // lockstep; the now-playing feature reads media-session metadata via a
+  // notification listener, so both must disclose it.
+  const html = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+  const md = fs.readFileSync(path.join(REPO, 'docs/privacy-policy.md'), 'utf8');
+  for (const c of [html, md]) {
+    assert.match(c, /media[- ]session/i);
+    assert.match(c, /notification access|notification listener/i);
+  }
+});
+
 test('index.html embeds the privacy overlay element starting hidden', () => {
   const p = path.join(REPO, 'index.html');
   const c = fs.readFileSync(p, 'utf8');

@@ -17,6 +17,7 @@ for f in \
     audio-features.js \
     palette-color.js \
     view-ids.js \
+    now-playing.js \
     palette-sets.js \
     mesh-warp.js \
     swipe-detector.js \
