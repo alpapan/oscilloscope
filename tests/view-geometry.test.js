@@ -1,7 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { canopyEdge, spiral, bloom, starburst, lasso, nova, smoothWave4 } = require("../view-geometry.js");
+const { canopyEdge, spiral, bloom, starburst, lasso, nova, smoothWave4, rotateXY } = require("../view-geometry.js");
 
 test("canopyEdge fills from the top down to the waveform edge", () => {
   const wave = new Float32Array([0, 0, 0, 0]);
@@ -36,17 +36,28 @@ test("spiral: closed loop, finite, zeros collapse to a known point", () => {
 });
 test("bloom/starburst/lasso/nova: finite and on a sane canvas", () => {
   const L = flat(2048, 0.2), R = flat(2048, -0.1);
+  const opts = { w: 400, h: 400, time: 1.5, bpm: 120, bassAtt: 0.3, rms: 0.2 };
   for (const fn of [bloom, starburst, lasso, nova]) {
-    const pts = fn(L, R, { w: 400, h: 400, time: 1.5, bpm: 120, bassAtt: 0.3, rms: 0.2 });
+    const pts = fn(L, R, opts);
     assert.ok(pts.length > 8, `${fn.name} count`);
     assert.ok(allFinite(pts), `${fn.name} finite`);
     assert.ok(pts.every(p => p[0] > -400 && p[0] < 800 && p[1] > -400 && p[1] < 800), `${fn.name} bounds`);
   }
 });
+test("rotateXY rotates a vector around the origin", () => {
+  const [x1, y1] = rotateXY(1, 0, Math.PI / 2);
+  assert.ok(Math.abs(x1) < 1e-9 && Math.abs(y1 - 1) < 1e-9, `quarter turn: ${x1},${y1}`);
+  const [x2, y2] = rotateXY(1, 0, Math.PI);
+  assert.ok(Math.abs(x2 + 1) < 1e-9 && Math.abs(y2) < 1e-9, `half turn: ${x2},${y2}`);
+  const [x3, y3] = rotateXY(0.3, -0.7, 0);   // identity at theta 0
+  assert.ok(Math.abs(x3 - 0.3) < 1e-9 && Math.abs(y3 + 0.7) < 1e-9, `identity: ${x3},${y3}`);
+});
+
 test("geometry never reads past the buffer end (tight buffer)", () => {
   const L = flat(256), R = flat(256);
+  const opts = { w:400, h:400, time:1, bpm:120, bassAtt:0.5, rms:0.3, samples:256 };
   for (const fn of [spiral, bloom, starburst, lasso, nova]) {
-    const pts = fn(L, R, { w:400, h:400, time:1, bpm:120, bassAtt:0.5, rms:0.3, samples:256 });
+    const pts = fn(L, R, opts);
     assert.ok(pts.every(p => Number.isFinite(p[0]) && Number.isFinite(p[1])), `${fn.name} finite on tight buffer`);
   }
 });

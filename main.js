@@ -317,6 +317,10 @@ const THICK_OFFSETS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
 // Per-view feedback-trail override (mixed look): the flowier shapes leave a
 // Milkdrop-style smear; everything else uses the palette's decayAlpha.
 const VIEW_DECAY = { spiral: 0.42, lasso: 0.45, nova: 0.40 };
+// Lissajous holds horizontal (base PI/2) and sways gently around it, never
+// swinging to vertical. It crosses exact horizontal every ~10 s.
+const LISSAJOUS_SWAY = Math.PI / 9;     // amplitude, ~20 deg either side
+const LISSAJOUS_SWAY_PERIOD = 20;       // seconds for a full sway cycle
 // Filters are populated inside init() once PIXI globals are available
 // (they reference new PIXI.filters.GlowFilter etc.; instantiating them at
 // module top-level would crash under node --test).
@@ -1477,13 +1481,17 @@ function drawLissajous(g, analyserL, analyserR, theme, w, h) {
   const cy = h / 2;
   const inv = 1 / Math.SQRT2;
 
+  // Base PI/2 swaps the vertical L+R dominant axis to horizontal; the figure
+  // then sways gently around horizontal (never reaching vertical).
+  const now = performance.now() / 1000;
+  const theta = Math.PI / 2 + LISSAJOUS_SWAY * Math.sin((2 * Math.PI / LISSAJOUS_SWAY_PERIOD) * now);
   const points = new Array(n);
   for (let i = 0; i < n; i++) {
     const xr = (bufL[i] - bufR[i]) * radius * inv;
     const yr = (bufL[i] + bufR[i]) * radius * inv;
-    points[i] = [cx + xr, cy - yr];
+    const [rx, ry] = window.ViewGeometry.rotateXY(xr, yr, theta);
+    points[i] = [cx + rx, cy - ry];
   }
-  const now = performance.now() / 1000;
   strokeMultiOffset(g, points, theme, w, h, now, state.audio.beatPulse || 0);
 }
 

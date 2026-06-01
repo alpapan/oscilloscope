@@ -31,9 +31,15 @@ function smoothWave4(pts) {
   return out;
 }
 
+// Rotate a 2D vector around the origin by theta radians.
+function rotateXY(x, y, theta) {
+  const c = Math.cos(theta), s = Math.sin(theta);
+  return [x * c - y * s, x * s + y * c];
+}
+
 // Spiral - projectM XYOscillationSpiral (closed loop).
 // `spin` tempo-scales the rotation (app-specific improvement; projectM uses a constant 2.3).
-function spiral(L, R, { w, h, time = 0, bpm = 120, bassAtt = 0, samples = 256 } = {}) {
+function spiral(L, R, { w, h, time = 0, bpm = 120, bassAtt = 0, samples = 256 }) {
   const cx = w/2, cy = h/2, Rs = Math.min(w, h) * 0.40;
   const maxSafe = Math.max(1, L.length - 32);
   const N = Math.min(samples, maxSafe);
@@ -52,7 +58,7 @@ function spiral(L, R, { w, h, time = 0, bpm = 120, bassAtt = 0, samples = 256 } 
 // Bloom - projectM Milkdrop2077WaveFlower (loop).
 // projectM's `+ m_waveX*cos(PI)` centre-offset terms are omitted: this app centres
 // in screen space (cx +/- coord*Rs), so adding them would double-offset.
-function bloom(L, R, { w, h, time = 0, bassAtt = 0, samples } = {}) {
+function bloom(L, R, { w, h, time = 0, bassAtt = 0, samples = 1024 }) {
   const cx = w/2, cy = h/2, Rs = Math.min(w, h) * 0.42;
   const maxSafe = Math.max(1, L.length - 1);
   const total = Math.min(samples || 1024, maxSafe);
@@ -76,7 +82,7 @@ function bloom(L, R, { w, h, time = 0, bassAtt = 0, samples } = {}) {
 }
 
 // Starburst - projectM Milkdrop2077WaveStar (loop). Centre-offset omitted (see bloom).
-function starburst(L, R, { w, h, time = 0, bassAtt = 0, samples } = {}) {
+function starburst(L, R, { w, h, time = 0, bassAtt = 0, samples = 1024 }) {
   const cx = w/2, cy = h/2, Rs = Math.min(w, h) * 0.44;
   const maxSafe = Math.max(1, L.length - 1);
   const total = Math.min(samples || 1024, maxSafe);
@@ -99,7 +105,7 @@ function starburst(L, R, { w, h, time = 0, bassAtt = 0, samples } = {}) {
 
 // Lasso - projectM Milkdrop2077WaveLasso. `angle` guarded from 0 and output clamped
 // to tame the tan(time/angle) singularity (projectM is unguarded).
-function lasso(L, R, { w, h, time = 0, samples } = {}) {
+function lasso(L, R, { w, h, time = 0, samples = 1024 }) {
   const cx = w/2, cy = h/2, Rs = Math.min(w, h) * 0.42;
   const maxSafe = Math.max(1, L.length - 32);
   const N = Math.min(samples || 1024, maxSafe);
@@ -117,7 +123,7 @@ function lasso(L, R, { w, h, time = 0, samples } = {}) {
 }
 
 // Nova - projectM ExplosiveHash (rotating product cloud). Not smoothed: the scatter is the point.
-function nova(L, R, { w, h, time = 0, rms = 0, samples } = {}) {
+function nova(L, R, { w, h, time = 0, rms = 0, samples = 1024 }) {
   const cx = w/2, cy = h/2, Rs = Math.min(w, h) * 0.42;
   const maxSafe = Math.max(1, L.length - 32);
   const N = Math.min(samples || 1024, maxSafe);
@@ -134,5 +140,5 @@ function nova(L, R, { w, h, time = 0, rms = 0, samples } = {}) {
   return pts;
 }
 
-if (typeof module !== "undefined" && module.exports) module.exports = { canopyEdge, smoothWave4, spiral, bloom, starburst, lasso, nova };
-if (typeof globalThis !== "undefined") globalThis.ViewGeometry = { canopyEdge, smoothWave4, spiral, bloom, starburst, lasso, nova };
+if (typeof module !== "undefined" && module.exports) module.exports = { canopyEdge, smoothWave4, rotateXY, spiral, bloom, starburst, lasso, nova };
+if (typeof globalThis !== "undefined") globalThis.ViewGeometry = { canopyEdge, smoothWave4, rotateXY, spiral, bloom, starburst, lasso, nova };
