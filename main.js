@@ -735,6 +735,19 @@ async function autoSwitchToMode(micMode, toastText) {
   // flipping state.running, so no explicit call needed here.)
 }
 
+// Drawer "Microphone capture" toggle. While capturing, actually switch the
+// source live (stop -> flip -> restart, like the Switch-back banner) so the
+// badge and visualisation reflect the change; otherwise just record the
+// preference for the next capture start.
+function setMicModeFromUi(on) {
+  if (state.running && PLATFORM === "android") {
+    autoSwitchToMode(on, on ? "Switched to microphone" : "Switched to system audio");
+  } else {
+    state.micMode = on;
+    applyState();
+  }
+}
+
 // Persistent "SYSTEM" / "MIC" pill in the top-right that shows which source
 // the visualisation is reading from. Hidden when capture is not running.
 function updateCaptureModeBadge() {
@@ -2040,7 +2053,7 @@ async function init() {
       document.getElementById("mobile-capture").onclick = () => { state.micMode = captureSourceMicMode("audio"); startCapture(); };
       document.getElementById("mobile-capture-mic").onclick = () => { state.micMode = captureSourceMicMode("mic"); startCapture(); };
       document.getElementById("mobile-stop").onclick = stopCapture;
-      MobileUI.wireDrawer(state, applyState);
+      MobileUI.wireDrawer(state, applyState, setMicModeFromUi);
       window.Capacitor?.Plugins?.ScopeAudio?.setSmoothingAlpha?.({value: state.smoothing});   // initial sync of slider value into phone-side prep pipeline
       MobileUI.wireGestures(document.getElementById("stage"), state, applyState);
       // The PiP RemoteAction calls window.cycleView(1) via the Capacitor bridge.

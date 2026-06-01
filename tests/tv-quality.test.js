@@ -22,7 +22,7 @@ test("smoothing slider handler calls setSmoothingAlpha after writing state.smoot
 test("phone init pushes initial setSmoothingAlpha", () => {
   const js = read("main.js");
   // After MobileUI.wireDrawer line (1516), a setSmoothingAlpha call must appear.
-  assert.match(js, /MobileUI\.wireDrawer\(state,\s*applyState\)\s*;[\s\S]{0,400}?setSmoothingAlpha\?\.\(\{\s*value:\s*state\.smoothing\s*\}\)/);
+  assert.match(js, /MobileUI\.wireDrawer\(state,\s*applyState[^)]*\)\s*;[\s\S]{0,400}?setSmoothingAlpha\?\.\(\{\s*value:\s*state\.smoothing\s*\}\)/);
 });
 
 test("index.html fft dropdown uses k-labelled options and excludes 32768", () => {

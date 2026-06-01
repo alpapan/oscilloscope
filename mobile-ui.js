@@ -84,7 +84,7 @@
     }
   }
 
-  function wireDrawer(state, applyState) {
+  function wireDrawer(state, applyState, onMicToggle) {
     document.querySelectorAll("#mobile-theme-chips .chip").forEach(b => {
       b.addEventListener("click", () => {
         state.theme = b.dataset.theme;
@@ -154,8 +154,10 @@
     if (micToggle) {
       micToggle.checked = !!state.micMode;
       micToggle.addEventListener("change", e => {
-        state.micMode = !!e.target.checked;
-        applyState();   // redirect away from now-playing if mic mode just turned on
+        // While capturing this switches the source live (and redirects away
+        // from now-playing); pre-capture it just records the preference.
+        if (onMicToggle) onMicToggle(!!e.target.checked);
+        else { state.micMode = !!e.target.checked; applyState(); }
       });
     }
     const micAutoToggle = document.getElementById("mobile-micmode-auto");
