@@ -372,6 +372,7 @@ body.drawer-open #mobile-drawer { transform: translateX(0); }
   background: var(--fg);
   color: var(--bg);
 }
+.chip-full { width: 100%; flex-basis: 100%; min-height: 44px; }
 
 .stepper {
   display: flex;

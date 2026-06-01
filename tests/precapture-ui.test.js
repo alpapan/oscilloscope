@@ -12,11 +12,12 @@ test("start screen has both capture buttons", () => {
 
 test("pre-capture-safe drawer sections are marked pc-keep", () => {
   const html = read("index.html");
+  assert.match(html, /<section class="pc-keep">\s*<label class="mobile-field">View/);
   assert.match(html, /<section class="pc-keep">\s*<h2>Theme<\/h2>/);
   assert.match(html, /<section class="pc-keep">\s*<label class="toggle"><input id="mobile-keepawake"/);
-  // Exactly two sections kept - guards against accidentally marking (or
-  // failing to mark) a section, which would mis-filter the pre-capture drawer.
-  assert.equal((html.match(/class="pc-keep"/g) || []).length, 2);
+  // Exactly three sections kept - View, Theme, and Keep awake. Guards against
+  // accidentally marking (or failing to mark) a section, which would mis-filter the pre-capture drawer.
+  assert.equal((html.match(/class="pc-keep"/g) || []).length, 3);
 });
 
 test("css hides live-only drawer items pre-capture", () => {

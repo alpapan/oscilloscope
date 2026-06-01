@@ -15,8 +15,10 @@
     //   1024 -> "1", 2048 -> "2", 16384 -> "16".
     return (n / 1024).toString() + "k";
   }
-  const VIEWS = ["waveform", "spectrum", "lissajous", "cosmos", "grove", "firebird"];
-  const VIEW_LABELS = { waveform: "Waveform", spectrum: "Spectrum", lissajous: "Lissajous", cosmos: "Cosmos", grove: "Grove", firebird: "Firebird" };
+  const VIEWS = (typeof window !== "undefined" && window.ViewIds)
+    ? window.ViewIds.VIEW_ORDER.slice()
+    : ["waveform","spectrum","lissajous","cosmos","grove","firebird","spiral","bloom","lasso","starburst","nova"];
+  const VIEW_LABELS = { waveform: "Waveform", spectrum: "Spectrum", lissajous: "Lissajous", cosmos: "Cosmos", grove: "Grove", firebird: "Firebird", spiral: "Spiral", bloom: "Bloom", lasso: "Lasso", starburst: "Starburst", nova: "Nova" };
 
   let toastTimer = null;
 
@@ -51,9 +53,14 @@
   }
 
   function refreshDrawer(state) {
+    const ex = window.PaletteSets ? window.PaletteSets.EXCLUSIVE[state.view] : null;
     document.querySelectorAll("#mobile-theme-chips .chip").forEach(b => {
       b.classList.toggle("active", b.dataset.theme === state.theme);
     });
+    const sns = document.getElementById("mobile-sns-chip");
+    if (sns) sns.classList.toggle("active", state.theme === ex);
+    const viewSel = document.getElementById("mobile-view");
+    if (viewSel) viewSel.value = state.view;
     const gain = document.getElementById("mobile-gain");
     if (gain) {
       gain.value = state.sensitivity;
@@ -81,6 +88,27 @@
         refreshDrawer(state);
       });
     });
+    const snsChip = document.getElementById("mobile-sns-chip");
+    if (snsChip) snsChip.addEventListener("click", () => {
+      state.theme = window.PaletteSets.EXCLUSIVE[state.view];   // signature palette in place
+      applyState();
+      refreshDrawer(state);
+    });
+    const mobileView = document.getElementById("mobile-view");
+    if (mobileView) {
+      mobileView.innerHTML = "";                       // populate from the single VIEWS source
+      for (const v of VIEWS) {
+        const opt = document.createElement("option");
+        opt.value = v; opt.textContent = VIEW_LABELS[v];
+        mobileView.appendChild(opt);
+      }
+      mobileView.addEventListener("change", e => {
+        state.view = e.target.value;
+        applyState();
+        refreshDrawer(state);
+        showToast(VIEW_LABELS[state.view]);
+      });
+    }
     document.getElementById("mobile-gain").addEventListener("input", e => {
       state.sensitivity = parseFloat(e.target.value);
       applyState();
@@ -230,6 +258,7 @@
     // Canvas gestures:
     //   - Double-tap: cycle view (replaced earlier swipe-right which fought
     //     the Android system back gesture from the screen edge).
+    //   - Single-tap: cycle palette.
     //   - Swipe-left: open the settings drawer. Edge deadzone in
     //     classifySwipe rejects swipes starting near either screen edge so
     //     the system back-gesture wins uncontested in that zone.
@@ -238,6 +267,7 @@
     let x0 = 0, y0 = 0;
     let lastTapTime = 0;
     let lastTapX = 0, lastTapY = 0;
+    let singleTapTimer = null;
     const DOUBLE_TAP_MS = 300;
     const DOUBLE_TAP_PX = 50;
     const TAP_MAX_DISTANCE_PX = 10;
@@ -254,18 +284,25 @@
       const dy = t.clientY - y0;
       const dist = Math.hypot(dx, dy);
 
-      // Tap (negligible movement): double-tap cycles view.
+      // Tap (negligible movement): single-tap cycles palette, double-tap cycles view.
       if (dist < TAP_MAX_DISTANCE_PX) {
         const now = Date.now();
         if (now - lastTapTime < DOUBLE_TAP_MS &&
             Math.abs(t.clientX - lastTapX) < DOUBLE_TAP_PX &&
             Math.abs(t.clientY - lastTapY) < DOUBLE_TAP_PX) {
-          cycleView(+1, state, applyState);
-          lastTapTime = 0; // reset to require a fresh double for next cycle
+          if (singleTapTimer) { clearTimeout(singleTapTimer); singleTapTimer = null; }
+          cycleView(+1, state, applyState);   // double-tap: next view
+          lastTapTime = 0;
         } else {
-          lastTapTime = now;
-          lastTapX = t.clientX;
-          lastTapY = t.clientY;
+          lastTapTime = now; lastTapX = t.clientX; lastTapY = t.clientY;
+          if (singleTapTimer) clearTimeout(singleTapTimer);
+          singleTapTimer = setTimeout(() => {   // single-tap (confirmed): cycle palette
+            singleTapTimer = null;
+            state.theme = window.PaletteSets.nextPalette(state.view, state.theme, +1);
+            applyState();
+            refreshDrawer(state);
+            showToast(state.theme);
+          }, DOUBLE_TAP_MS);
         }
         return;
       }

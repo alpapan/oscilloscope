@@ -38,6 +38,11 @@
         <option value="cosmos">Cosmos</option>
         <option value="grove">Grove</option>
         <option value="firebird">Firebird</option>
+        <option value="spiral">Spiral</option>
+        <option value="bloom">Bloom</option>
+        <option value="lasso">Lasso</option>
+        <option value="starburst">Starburst</option>
+        <option value="nova">Nova</option>
       </select>
     </label>
     <label>Theme
@@ -49,6 +54,14 @@
         <option value="verdant">Verdant</option>
         <option value="ember">Ember</option>
         <option value="chroma">Chroma</option>
+        <option value="phosphor">Phosphor (Waveform)</option>
+        <option value="prism">Prism (Spectrum)</option>
+        <option value="stereo">Stereo (Lissajous)</option>
+        <option value="vortex">Vortex (Spiral)</option>
+        <option value="orchid">Orchid (Bloom)</option>
+        <option value="voltage">Voltage (Lasso)</option>
+        <option value="supernova">Supernova (Starburst)</option>
+        <option value="plasma">Plasma (Nova)</option>
       </select>
     </label>
     <label>Sensitivity
@@ -153,16 +166,19 @@
       <button id="mobile-drawer-close" type="button" aria-label="Close settings">&#x2715;</button>
     </header>
     <section class="pc-keep">
+      <label class="mobile-field">View
+        <select id="mobile-view"></select>
+      </label>
+    </section>
+    <section class="pc-keep">
       <h2>Theme</h2>
       <div id="mobile-theme-chips" class="chips">
         <button type="button" data-theme="crt" class="chip">CRT</button>
         <button type="button" data-theme="neon" class="chip">Neon</button>
         <button type="button" data-theme="mono" class="chip">Mono</button>
-        <button type="button" data-theme="nebula" class="chip">Nebula</button>
-        <button type="button" data-theme="verdant" class="chip">Verdant</button>
-        <button type="button" data-theme="ember" class="chip">Ember</button>
         <button type="button" data-theme="chroma" class="chip">Chroma</button>
       </div>
+      <button type="button" id="mobile-sns-chip" class="chip chip-full">Saturday night special</button>
     </section>
     <section>
       <h2>Sensitivity</h2>
@@ -224,6 +240,8 @@
   <script src="swipe-detector.js"></script>
   <script src="audio-features.js"></script>
   <script src="palette-color.js"></script>
+  <script src="view-ids.js"></script>
+  <script src="palette-sets.js"></script>
   <script src="view-geometry.js"></script>
   <script src="particles.js"></script>
   <script src="mesh-warp.js"></script>

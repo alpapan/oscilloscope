@@ -40,3 +40,18 @@ test("bakeRamp applies hueOffsetDeg only to tempoHue palettes", () => {
   const rot120 = { fg: 0, tempoHue: true, ramp: stops.map(s => ({ ...s })) }; bakeRamp(rot120, 120);
   assert.notStrictEqual(colorAt(rot0, 0.5), colorAt(rot120, 0.5), "tempoHue palette rotates with offset");
 });
+
+test("new exclusive palettes bake to a 256-entry multi-stop LUT", () => {
+  const ramps = {
+    phosphor: [{L:0.32,C:0.09,h:70},{L:0.93,C:0.07,h:88}],
+    prism:    [{L:0.60,C:0.20,h:25},{L:0.52,C:0.22,h:300}],
+    plasma:   [{L:0.42,C:0.19,h:290},{L:0.95,C:0.08,h:72}],
+  };
+  for (const key of Object.keys(ramps)) {
+    const p = { ramp: ramps[key] };
+    bakeRamp(p, 0);
+    assert.ok(p._lut && p._lut.length === 256, `${key} LUT`);
+    assert.notStrictEqual(p._lut[0], p._lut[255]);
+    assert.ok(new Set(p._lut).size > 8, `${key} is a real multi-stop gradient`);
+  }
+});

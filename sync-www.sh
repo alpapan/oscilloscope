@@ -16,6 +16,8 @@ for f in \
     audio-worklet-processor.js \
     audio-features.js \
     palette-color.js \
+    view-ids.js \
+    palette-sets.js \
     mesh-warp.js \
     swipe-detector.js \
     mobile-ui.js \

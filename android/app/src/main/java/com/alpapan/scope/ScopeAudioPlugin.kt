@@ -458,6 +458,17 @@ class ScopeAudioPlugin : Plugin() {
                 val db = FloatArray(mags.size) { 20f * log10((mags[it] + 1e-9f)) }
                 com.alpapan.scope.tv.AnalysisFrameCodec.encodeWaveformAndSpectrum(s.view, dL, dR, db)
             }
+            6, 7, 8, 9, 10 -> {                                                 // spiral/bloom/lasso/starburst/nova: reuse the stereo-waveform prep (like lissajous, case 2)
+                val sL = WaveformPrep.pcmSmooth(winL, smoothScratchL)
+                val emaL = WaveformPrep.smoothBuf("L", sL, smoothingAlpha)
+                val dL = downsampleForWireIfConfigured(emaL)
+                val dR = if (winR != null) {
+                    val sR = WaveformPrep.pcmSmooth(winR, smoothScratchR)
+                    val emaR = WaveformPrep.smoothBuf("R", sR, smoothingAlpha)
+                    downsampleForWireIfConfigured(emaR)
+                } else null   // mono-paired source: shapes fall back to L-only
+                com.alpapan.scope.tv.AnalysisFrameCodec.encodeWaveform(s.view, dL, dR)
+            }
             else -> {                                                           // waveform (view==0): smooth + trigger + trim + downsample
                 val sL = WaveformPrep.pcmSmooth(winL, smoothScratchL)
                 val emaL = WaveformPrep.smoothBuf("L", sL, smoothingAlpha)

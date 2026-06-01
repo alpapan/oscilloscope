@@ -1,0 +1,13 @@
+This project is licensed under the MIT License (see LICENSE).
+
+Attribution
+-----------
+The Spiral, Bloom, Lasso, Starburst and Nova visualisation views are
+re-implementations of waveform-mode mathematics from projectM
+(https://github.com/projectM-visualizer/projectm), which is licensed under the
+GNU Lesser General Public License v2.1 (LGPL-2.1). The algorithms were
+re-expressed independently in JavaScript; no projectM source files are included
+or distributed with this project.
+
+projectM waveform modes referenced: XYOscillationSpiral, Milkdrop2077WaveFlower,
+Milkdrop2077WaveStar, Milkdrop2077WaveLasso, and ExplosiveHash.

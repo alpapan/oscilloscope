@@ -286,8 +286,37 @@ const themes = {
             { L: 0.22, C: 0.16, h: 330 }, { L: 0.42, C: 0.24, h: 330 },
             { L: 0.62, C: 0.26, h: 330 }, { L: 0.80, C: 0.20, h: 330 },
             { L: 0.95, C: 0.07, h: 330 } ] },
+  // --- Per-view exclusive palettes (one per view; not in the generic chip grid).
+  phosphor:  { fg: 0xffb000, fgCss:"#ffb000", decayAlpha:1.0, lineWidth:2.0, filters:[],
+               hueCycleRadians: Math.PI/14, hueShiftOnBeat: 0, ramp:[
+                 {L:0.32,C:0.09,h:70},{L:0.55,C:0.15,h:75},{L:0.78,C:0.17,h:80},{L:0.93,C:0.07,h:88} ] },
+  prism:     { fg: 0x19e3b1, fgCss:"#19e3b1", decayAlpha:1.0, lineWidth:2.0, filters:[],
+               hueCycleRadians: 0, hueShiftOnBeat: 0, ramp:[
+                 {L:0.60,C:0.20,h:25},{L:0.72,C:0.18,h:60},{L:0.82,C:0.17,h:100},{L:0.74,C:0.17,h:150},
+                 {L:0.68,C:0.15,h:200},{L:0.55,C:0.20,h:260},{L:0.52,C:0.22,h:300} ] },
+  stereo:    { fg: 0x2ee6e6, fgCss:"#2ee6e6", decayAlpha:1.0, lineWidth:2.0, filters:[],
+               hueCycleRadians: Math.PI*0.6, hueShiftOnBeat: Math.PI/5, ramp:[
+                 {L:0.46,C:0.13,h:195},{L:0.70,C:0.16,h:200},{L:0.90,C:0.04,h:250},{L:0.70,C:0.17,h:330},{L:0.54,C:0.20,h:320} ] },
+  vortex:    { fg: 0xa855f7, fgCss:"#a855f7", decayAlpha:1.0, lineWidth:2.0, filters:[],
+               hueCycleRadians: Math.PI, hueShiftOnBeat: Math.PI/3, ramp:[
+                 {L:0.40,C:0.17,h:265},{L:0.56,C:0.21,h:290},{L:0.70,C:0.20,h:320},{L:0.64,C:0.17,h:215},{L:0.52,C:0.19,h:255} ] },
+  orchid:    { fg: 0xff4f9a, fgCss:"#ff4f9a", decayAlpha:1.0, lineWidth:2.0, filters:[],
+               hueCycleRadians: Math.PI/8, hueShiftOnBeat: Math.PI/6, ramp:[
+                 {L:0.46,C:0.17,h:338},{L:0.62,C:0.21,h:352},{L:0.73,C:0.19,h:22},{L:0.83,C:0.15,h:65},{L:0.93,C:0.06,h:92} ] },
+  voltage:   { fg: 0x9eff2e, fgCss:"#9eff2e", decayAlpha:1.0, lineWidth:2.0, filters:[],
+               hueCycleRadians: Math.PI/3, hueShiftOnBeat: Math.PI/2, ramp:[
+                 {L:0.50,C:0.17,h:250},{L:0.72,C:0.22,h:150},{L:0.86,C:0.21,h:120},{L:0.96,C:0.09,h:105} ] },
+  supernova: { fg: 0xffcf3f, fgCss:"#ffcf3f", decayAlpha:1.0, lineWidth:2.0, filters:[],
+               hueCycleRadians: Math.PI/6, hueShiftOnBeat: Math.PI/3, ramp:[
+                 {L:0.95,C:0.05,h:230},{L:0.85,C:0.13,h:200},{L:0.80,C:0.18,h:90},{L:0.70,C:0.20,h:45},{L:0.58,C:0.22,h:25} ] },
+  plasma:    { fg: 0xd6249f, fgCss:"#d6249f", decayAlpha:1.0, lineWidth:2.0, filters:[],
+               hueCycleRadians: Math.PI, hueShiftOnBeat: Math.PI/2, ramp:[
+                 {L:0.42,C:0.19,h:290},{L:0.58,C:0.23,h:325},{L:0.66,C:0.23,h:12},{L:0.78,C:0.19,h:48},{L:0.95,C:0.08,h:72} ] },
 };
 const THICK_OFFSETS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+// Per-view feedback-trail override (mixed look): the flowier shapes leave a
+// Milkdrop-style smear; everything else uses the palette's decayAlpha.
+const VIEW_DECAY = { spiral: 0.42, lasso: 0.45, nova: 0.40 };
 // Filters are populated inside init() once PIXI globals are available
 // (they reference new PIXI.filters.GlowFilter etc.; instantiating them at
 // module top-level would crash under node --test).
@@ -899,10 +928,10 @@ function wireTvRemote() {
         // Round-trip via phone: compute the new view locally (without mutating
         // state.view) and ask the phone to apply. The phone will mirror back
         // and our tvRenderRequest listener (above) will then set state.view.
-        const order = ["waveform", "spectrum", "lissajous", "cosmos", "grove", "firebird"];
+        const order = window.ViewIds.VIEW_ORDER;
         const idx = order.indexOf(state.view);
         const next = order[(idx + direction + order.length) % order.length];
-        const v = next === "spectrum" ? 1 : next === "lissajous" ? 2 : next === "cosmos" ? 3 : next === "grove" ? 4 : next === "firebird" ? 5 : 0;
+        const v = window.ViewIds.viewToId(next);
         window.Capacitor?.Plugins?.ScopeAudio?.sendRenderRequest({
           type: "remote-view-request", view: v,
         });
@@ -949,8 +978,8 @@ async function startTvMode() {
     try { payload = JSON.parse(e.json); } catch (_err) { return; }
     if (payload && payload.type === "mirror-state") {   // forward-compat: unknown types ignored
       const { view, theme } = payload;
-      state.view = view === 1 ? "spectrum" : view === 2 ? "lissajous" : view === 3 ? "cosmos" : view === 4 ? "grove" : view === 5 ? "firebird" : "waveform";
-      if (["crt", "neon", "mono", "nebula", "verdant", "ember", "chroma"].includes(theme)) state.theme = theme;
+      state.view = window.ViewIds.idToView(view);
+      if (themes[theme]) state.theme = theme;
       applyState();
     }
   });
@@ -965,9 +994,9 @@ async function startTvMode() {
 
 // Tell the phone which arrays to compute for the current view.
 function sendTvRenderRequest() {
-  const v = state.view === "spectrum" ? 1 : state.view === "lissajous" ? 2 : state.view === "cosmos" ? 3 : state.view === "grove" ? 4 : state.view === "firebird" ? 5 : 0;
+  const v = window.ViewIds.viewToId(state.view);
   window.Capacitor?.Plugins?.ScopeAudio?.sendRenderRequest({
-    type: "render-request", view: v, waveformPoints: state.fftSize, fftBins: state.fftSize >> 1, channels: v === 2 ? 2 : 1, fftSize: state.fftSize,
+    type: "render-request", view: v, waveformPoints: state.fftSize, fftBins: state.fftSize >> 1, channels: (v === 2 || v >= 6) ? 2 : 1, fftSize: state.fftSize,
   });
 }
 
@@ -1081,8 +1110,8 @@ async function connectToTv() {
   // resolved view back to the TV.
   await plugin.addListener("phoneViewRequest", (e) => {
     const view = e?.view;
-    if (![0, 1, 2, 3, 4, 5].includes(view)) return;
-    state.view = view === 1 ? "spectrum" : view === 2 ? "lissajous" : view === 3 ? "cosmos" : view === 4 ? "grove" : view === 5 ? "firebird" : "waveform";
+    if (typeof view !== "number" || view < 0 || view >= window.ViewIds.VIEW_ORDER.length) return;
+    state.view = window.ViewIds.idToView(view);
     applyState();
   });
   renderTvList(found);
@@ -1094,13 +1123,14 @@ if (typeof window !== "undefined") window.connectToTv = connectToTv;
 // the phone's visual state. No-op when not paired - the JS-side state.paired
 // gates the call (the Kotlin side also no-ops when the socket is not connected).
 function sendPhoneMirror() {
-  const v = state.view === "spectrum" ? 1 : state.view === "lissajous" ? 2 : state.view === "cosmos" ? 3 : state.view === "grove" ? 4 : state.view === "firebird" ? 5 : 0;
+  const v = window.ViewIds.viewToId(state.view);
   window.Capacitor?.Plugins?.ScopeAudio?.sendPhoneMirror({
     type: "mirror-state", view: v, theme: state.theme,
   });
 }
 
 function applyState() {
+  if (window.PaletteSets) state.theme = window.PaletteSets.reconcileTheme(state.view, state.theme);
   // When Auto-gain is ON, the per-frame envelope follower writes gain
   // directly; don't clobber it from the slider value.
   if (audio.gain && !state.autoGain) {
@@ -1251,7 +1281,8 @@ function frameBody() {
 
   // Step 1: decay (or full clear) on the trail texture.
   pixi.fade.clear();
-  pixi.fade.rect(0, 0, w, h).fill({ color: 0x000000, alpha: theme.decayAlpha });
+  const decayAlpha = VIEW_DECAY[state.view] ?? theme.decayAlpha;
+  pixi.fade.rect(0, 0, w, h).fill({ color: 0x000000, alpha: decayAlpha });
   pixi.app.renderer.render(pixi.fade, { renderTexture: pixi.trail, clear: false });
 
   // Step 2: build this frame's fresh trace. mesh-warp is applied to the
@@ -1274,6 +1305,11 @@ function frameBody() {
   if (state.view === "cosmos") drawCosmos(pixi.current, theme, w, h);
   if (state.view === "grove") drawGrove(pixi.current, audio.eqAnalyserL || audio.analyserL, theme, w, h);
   if (state.view === "firebird") drawFirebird(pixi.current, theme, w, h);
+  if (state.view === "spiral") drawSpiral(pixi.current, audio.eqAnalyserL || audio.analyserL, audio.eqAnalyserR || audio.analyserR, theme, w, h);
+  if (state.view === "bloom") drawBloom(pixi.current, audio.eqAnalyserL || audio.analyserL, audio.eqAnalyserR || audio.analyserR, theme, w, h);
+  if (state.view === "lasso") drawLasso(pixi.current, audio.eqAnalyserL || audio.analyserL, audio.eqAnalyserR || audio.analyserR, theme, w, h);
+  if (state.view === "starburst") drawStarburst(pixi.current, audio.eqAnalyserL || audio.analyserL, audio.eqAnalyserR || audio.analyserR, theme, w, h);
+  if (state.view === "nova") drawNova(pixi.current, audio.eqAnalyserL || audio.analyserL, audio.eqAnalyserR || audio.analyserR, theme, w, h);
 
   // Step 3: bake current onto the trail texture.
   pixi.app.renderer.render(pixi.current, { renderTexture: pixi.trail, clear: false });
@@ -1335,6 +1371,27 @@ function strokeMultiOffset(g, points, theme, w, h, time, beatPulse) {
     else g.lineTo(px, py);
   }
   g.stroke({ color, width: theme.lineWidth, alpha: 1.0 });
+}
+
+// Gradient stroke: colour each segment by its position along the curve using
+// the palette's baked ramp (PaletteColor.colorAt). Falls back to fg for ramp-less
+// (generic) palettes, so a shape view under e.g. Neon is single-colour.
+// Pixi v8: stroke() applies only to geometry added since the last stroke()/fill(),
+// so each moveTo/lineTo/stroke() colours one segment independently (same path-flush
+// mechanism strokeMultiOffset relies on for its 5 passes).
+function strokeGradient(g, points, theme) {
+  const n = points.length;
+  if (n < 2) return;
+  const PC = window.PaletteColor;
+  const glow = PC ? PC.colorAt(theme, 0.5) : theme.fg;
+  for (let i = 0; i < n - 1; i++) { g.moveTo(points[i][0], points[i][1]); g.lineTo(points[i+1][0], points[i+1][1]); }
+  g.stroke({ color: glow, width: theme.lineWidth * 3, alpha: 0.18 });
+  for (let i = 0; i < n - 1; i++) {
+    const color = PC ? PC.colorAt(theme, i / (n - 1)) : theme.fg;
+    g.moveTo(points[i][0], points[i][1]);
+    g.lineTo(points[i+1][0], points[i+1][1]);
+    g.stroke({ color, width: theme.lineWidth, alpha: 1.0 });
+  }
 }
 
 function drawWaveform(g, analyser, theme, w, h) {
@@ -1612,6 +1669,41 @@ function drawFirebird(g, theme, w, h) {
       g.circle(p.x, p.y, 2.2).fill({ color: col(p.t), alpha: Math.max(0, 1 - p.age / p.life) });
     }
   }
+}
+
+function shapePcm(L, R) {
+  const n = L.fftSize;
+  const a = new Float32Array(n), b = new Float32Array(n);
+  L.getFloatTimeDomainData(a);
+  (R || L).getFloatTimeDomainData(b);
+  return [a, b];
+}
+function shapeOpts(w, h) {
+  const aud = state.audio || {};
+  return { w, h, time: performance.now() / 1000,
+    bpm: state.tempo ? state.tempo.avgBpm() : 120,
+    bassAtt: aud.bassAtt || 0, rms: aud.rms || 0 };
+}
+function drawSpiral(g, L, R, theme, w, h) {
+  if (!L) return;
+  const [a, b] = shapePcm(L, R);
+  strokeGradient(g, window.ViewGeometry.spiral(a, b, shapeOpts(w, h)), theme);
+}
+function drawBloom(g, L, R, theme, w, h) {
+  if (!L) return; const [a, b] = shapePcm(L, R);
+  strokeGradient(g, window.ViewGeometry.bloom(a, b, shapeOpts(w, h)), theme);
+}
+function drawLasso(g, L, R, theme, w, h) {
+  if (!L) return; const [a, b] = shapePcm(L, R);
+  strokeGradient(g, window.ViewGeometry.lasso(a, b, shapeOpts(w, h)), theme);
+}
+function drawStarburst(g, L, R, theme, w, h) {
+  if (!L) return; const [a, b] = shapePcm(L, R);
+  strokeGradient(g, window.ViewGeometry.starburst(a, b, shapeOpts(w, h)), theme);
+}
+function drawNova(g, L, R, theme, w, h) {
+  if (!L) return; const [a, b] = shapePcm(L, R);
+  strokeGradient(g, window.ViewGeometry.nova(a, b, shapeOpts(w, h)), theme);
 }
 
 // Fetch the native app version once and fill any present version labels
@@ -1904,19 +1996,19 @@ async function init() {
 
     document.addEventListener("keydown", (e) => {
       if (!state.running && e.key !== "Escape") return;
-      if (e.key === "1") { state.view = "waveform";  applyState(); }
-      if (e.key === "2") { state.view = "spectrum";  applyState(); }
-      if (e.key === "3") {
-        if (state.channels === 1) return;
-        state.view = "lissajous"; applyState();
+      const digit = parseInt(e.key, 10);
+      if (!Number.isNaN(digit) && e.key.length === 1) {
+        // "1".."9" -> idx 0..8 (waveform..lasso); "0" -> idx 9 (starburst);
+        // nova (idx 10) is reachable via the view dropdown / cycle only.
+        const idx = digit === 0 ? 9 : digit - 1;
+        const v = window.ViewIds.VIEW_ORDER[idx];
+        if (v) {
+          if (v === "lissajous" && state.channels === 1) return;
+          state.view = v; applyState();
+        }
       }
-      if (e.key === "4") { state.view = "cosmos";   applyState(); }
-      if (e.key === "5") { state.view = "grove";    applyState(); }
-      if (e.key === "6") { state.view = "firebird"; applyState(); }
       if (e.key === "t" || e.key === "T") {
-        const order = ["crt", "neon", "mono", "nebula", "verdant", "ember", "chroma"];
-        const idx = order.indexOf(state.theme);
-        state.theme = order[(idx + 1) % order.length];
+        state.theme = window.PaletteSets.nextPalette(state.view, state.theme, +1);
         applyState();
       }
       if (e.key === "f" || e.key === "F") {

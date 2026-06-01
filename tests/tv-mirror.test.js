@@ -48,8 +48,8 @@ test("phone-side tvConnected listener also pushes initial mirror-state", () => {
 
 test("sendPhoneMirror helper sends type:mirror-state with numeric view", () => {
   const js = read("main.js");
-  // Helper must encode view as numeric 0|1|2|3|4|5 (matching sendTvRenderRequest's convention).
-  assert.match(js, /function\s+sendPhoneMirror[\s\S]{0,400}?state\.view\s*===\s*["']spectrum["']\s*\?\s*1\s*:\s*state\.view\s*===\s*["']lissajous["']\s*\?\s*2\s*:\s*state\.view\s*===\s*["']cosmos["']\s*\?\s*3\s*:\s*state\.view\s*===\s*["']grove["']\s*\?\s*4\s*:\s*state\.view\s*===\s*["']firebird["']\s*\?\s*5\s*:\s*0/);
+  // Helper must encode view as numeric via window.ViewIds.viewToId (matching sendTvRenderRequest's convention).
+  assert.match(js, /function\s+sendPhoneMirror[\s\S]{0,400}?window\.ViewIds\.viewToId/);
   assert.match(js, /function\s+sendPhoneMirror[\s\S]{0,400}?type:\s*["']mirror-state["']/);
 });
 
@@ -64,12 +64,12 @@ test("startTvMode registers a tvRenderRequest listener that handles mirror-state
 
 test("tvRenderRequest listener validates theme against known palette set", () => {
   const js = read("main.js");
-  assert.match(js, /\["crt",\s*"neon",\s*"mono",\s*"nebula",\s*"verdant",\s*"ember",\s*"chroma"\]\.includes/);
+  assert.match(js, /if\s*\(\s*themes\[theme\]\s*\)\s*state\.theme\s*=\s*theme/);
 });
 
 test("tvRenderRequest listener maps numeric view back to string for state.view", () => {
   const js = read("main.js");
-  assert.match(js, /view\s*===\s*1\s*\?\s*["']spectrum["']\s*:\s*view\s*===\s*2\s*\?\s*["']lissajous["']\s*:\s*view\s*===\s*3\s*\?\s*["']cosmos["']\s*:\s*view\s*===\s*4\s*\?\s*["']grove["']\s*:\s*view\s*===\s*5\s*\?\s*["']firebird["']\s*:\s*["']waveform["']/);
+  assert.match(js, /addListener\("tvRenderRequest"[\s\S]{0,800}?window\.ViewIds\.idToView/);
 });
 
 test("tvRenderRequest listener wraps JSON.parse in try/catch", () => {
@@ -85,15 +85,13 @@ test("wireTvRemote D-pad checks state.paired before deciding routing", () => {
 
 test("wireTvRemote computes newView from a local order array for the round-trip", () => {
   const js = read("main.js");
-  assert.match(js, /const\s+order\s*=\s*\["waveform",\s*"spectrum",\s*"lissajous",\s*"cosmos",\s*"grove",\s*"firebird"\]/);
+  assert.match(js, /const\s+order\s*=\s*window\.ViewIds\.VIEW_ORDER/);
 });
 
-test("wireTvRemote encodes the cycled view numerically for all six views", () => {
-  // The remote round-trip maps `next` -> numeric view; it must cover cosmos/
-  // grove/firebird (3/4/5) in lockstep with the other numeric encode sites,
-  // or remote-cycling to a new view silently requests waveform from the phone.
+test("wireTvRemote encodes the cycled view numerically for all views", () => {
+  // The remote round-trip maps `next` -> numeric view using window.ViewIds.viewToId.
   const js = read("main.js");
-  assert.match(js, /next\s*===\s*["']spectrum["']\s*\?\s*1\s*:\s*next\s*===\s*["']lissajous["']\s*\?\s*2\s*:\s*next\s*===\s*["']cosmos["']\s*\?\s*3\s*:\s*next\s*===\s*["']grove["']\s*\?\s*4\s*:\s*next\s*===\s*["']firebird["']\s*\?\s*5\s*:\s*0/);
+  assert.match(js, /function\s+wireTvRemote[\s\S]{0,800}?window\.ViewIds\.viewToId\(next\)/);
 });
 
 test("wireTvRemote unpaired branch still calls MobileUI.cycleView (fallback)", () => {
@@ -111,9 +109,16 @@ test("phoneViewRequest listener maps numeric view back to string and calls apply
   assert.match(js, /addListener\("phoneViewRequest"[\s\S]{0,600}?state\.view\s*=[\s\S]{0,200}?applyState\(\)/);
 });
 
-test("phoneViewRequest listener admits all six numeric views (0..5)", () => {
-  // The validation gate must admit 0..5; a [0,1,2]-only gate silently drops
-  // remote-cycled cosmos/grove/firebird (3/4/5) so the phone never switches.
+test("phoneViewRequest listener admits all numeric views within VIEW_ORDER range", () => {
+  // The validation gate must admit all views in the ViewIds range.
   const js = read("main.js");
-  assert.match(js, /addListener\("phoneViewRequest"[\s\S]{0,600}?\[0,\s*1,\s*2,\s*3,\s*4,\s*5\]\.includes\(view\)/);
+  assert.match(js, /addListener\("phoneViewRequest"[\s\S]{0,600}?window\.ViewIds\.VIEW_ORDER\.length/);
+});
+
+test("sendTvRenderRequest encodes lissajous (v===2) and shape views (v>=6) as stereo channels", () => {
+  // Shape views 6-10 (spiral/bloom/lasso/starburst/nova) need stereo waveform data
+  // just like lissajous (view 2) already does. The channels field must be set to 2
+  // when (v === 2 || v >= 6), and 1 otherwise.
+  const js = read("main.js");
+  assert.match(js, /channels:\s*\(\s*v\s*===\s*2\s*\|\|\s*v\s*>=\s*6\s*\)\s*\?\s*2\s*:\s*1/);
 });
