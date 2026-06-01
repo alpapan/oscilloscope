@@ -21,6 +21,14 @@ test("viewToId / idToView round-trip", () => {
   assert.strictEqual(viewToId("waveform"), 0);
   assert.strictEqual(viewToId("nova"), 10);
 });
+test("viewsFor: excludes nowplaying in mic mode, includes it otherwise", () => {
+  const { viewsFor, VIEW_ORDER } = require("../view-ids.js");
+  assert.deepStrictEqual(viewsFor(false), VIEW_ORDER);
+  assert.ok(viewsFor(false).includes("nowplaying"));
+  assert.ok(!viewsFor(true).includes("nowplaying"));
+  assert.equal(viewsFor(true).length, VIEW_ORDER.length - 1);
+});
+
 test("unknown names/ids fall back to waveform / 0", () => {
   assert.strictEqual(viewToId("bogus"), 0);
   assert.strictEqual(idToView(99), "waveform");

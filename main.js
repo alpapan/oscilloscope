@@ -833,7 +833,9 @@ function renderNowPlayingInto(el, dto) {
 }
 
 function showNowPlayingOverlay(dto) {
-  if (state.view === "nowplaying" || !state.running) return;   // card shows it; HUD only while running
+  // card shows it; HUD only while running; never in mic mode (now-playing
+  // is unavailable there - the mic input is unrelated to the MediaSession).
+  if (state.view === "nowplaying" || !state.running || state.micMode) return;
   let el = document.getElementById("now-playing-overlay");
   if (!el) { el = document.createElement("div"); el.id = "now-playing-overlay"; document.body.appendChild(el); }
   renderNowPlayingInto(el, dto);
@@ -868,8 +870,8 @@ function updateNowPlayingCard() {
   let el = document.getElementById("now-playing-card");
   if (!el) { el = document.createElement("div"); el.id = "now-playing-card"; document.body.appendChild(el); }
   // As a view, the card only lives while the visualisation runs; pre-capture
-  // the start screen is up and no view renders.
-  if (state.view !== "nowplaying" || !state.running) { el.hidden = true; return; }
+  // the start screen is up and no view renders. Never shown in mic mode.
+  if (state.view !== "nowplaying" || !state.running || state.micMode) { el.hidden = true; return; }
   el.hidden = false;
   const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
   if (plugin && plugin.hasNotificationAccess && !nowPlayingAccessGranted) {
@@ -1282,6 +1284,10 @@ function sendPhoneMirror() {
 }
 
 function applyState() {
+  // now-playing is unavailable in mic mode (mic input is unrelated to the
+  // phone's MediaSession); redirect to a visualiser view. This is the central
+  // guard covering the cycle, the drawer dropdown, and hotkeys.
+  if (state.micMode && state.view === "nowplaying") state.view = "waveform";
   if (window.PaletteSets) state.theme = window.PaletteSets.reconcileTheme(state.view, state.theme);
   // When Auto-gain is ON, the per-frame envelope follower writes gain
   // directly; don't clobber it from the slider value.

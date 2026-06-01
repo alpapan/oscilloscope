@@ -45,9 +45,13 @@
   }
 
   function cycleView(direction, state, applyState) {
-    const i = VIEWS.indexOf(state.view);
-    const next = (i + direction + VIEWS.length) % VIEWS.length;
-    state.view = VIEWS[next];
+    // now-playing is excluded from the cycle in mic mode (viewsFor).
+    const views = (typeof window !== "undefined" && window.ViewIds && window.ViewIds.viewsFor)
+      ? window.ViewIds.viewsFor(state.micMode)
+      : VIEWS;
+    const cur = views.indexOf(state.view);
+    const i = cur < 0 ? 0 : (cur + direction + views.length) % views.length;
+    state.view = views[i];
     applyState();
     showToast(VIEW_LABELS[state.view]);
   }
@@ -151,6 +155,7 @@
       micToggle.checked = !!state.micMode;
       micToggle.addEventListener("change", e => {
         state.micMode = !!e.target.checked;
+        applyState();   // redirect away from now-playing if mic mode just turned on
       });
     }
     const micAutoToggle = document.getElementById("mobile-micmode-auto");
