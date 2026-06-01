@@ -45,4 +45,9 @@ object NowPlayingLogic {
     }
 
     fun shouldDropArt(encodedLen: Int, capBytes: Int): Boolean = encodedLen > capBytes
+
+    /** The on-wire "nothing playing" signal: a now-playing message with empty
+     *  fields. The TV's ingest treats all-empty fields as a clear, so this is
+     *  how the phone tells a paired TV to drop the readout when capture stops. */
+    fun clearMessage(): String = encodeMessage(NowPlaying("", "", "", null))
 }

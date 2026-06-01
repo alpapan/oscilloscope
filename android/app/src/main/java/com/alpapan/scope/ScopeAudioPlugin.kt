@@ -319,6 +319,9 @@ class ScopeAudioPlugin : Plugin() {
     private fun emitNowPlayingCleared() {
         // Not gated on isCapturing: runs as capture stops, to clear the JS state.
         notifyListeners("nowPlayingChanged", JSObject().put("title", "").put("artist", "").put("album", ""))
+        // Also clear a paired TV (no-op if not connected): when the phone stops
+        // capturing, the TV should drop its readout rather than freeze the card.
+        sender.sendControl(NowPlayingLogic.clearMessage())
     }
 
     /** Phone: start NSD browse; each resolved TV is surfaced as a `tvFound` event. */

@@ -37,6 +37,16 @@ class NowPlayingTest {
         val o = JSONObject(NowPlayingLogic.encodeMessage(NowPlaying("S", "B", "L", null)))
         assertFalse(o.has("art"))
     }
+    @Test fun clearMessage_isABlankNowPlayingMessage() {
+        // The on-wire "nothing playing" signal: a now-playing message with all
+        // fields empty, which the TV's ingest treats as a clear.
+        val o = JSONObject(NowPlayingLogic.clearMessage())
+        assertEquals("now-playing", o.getString("type"))
+        assertEquals("", o.getString("title"))
+        assertEquals("", o.getString("artist"))
+        assertEquals("", o.getString("album"))
+        assertFalse(o.has("art"))
+    }
     @Test fun artTargetSize_scalesLongestSideToMax() {
         assertEquals(384 to 192, NowPlayingLogic.artTargetSize(800, 400, 384))
         assertEquals(200 to 200, NowPlayingLogic.artTargetSize(200, 200, 384)) // already small
