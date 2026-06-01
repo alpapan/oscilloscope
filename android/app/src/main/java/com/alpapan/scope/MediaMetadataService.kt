@@ -12,27 +12,59 @@ import java.io.ByteArrayOutputStream
 
 class MediaMetadataService : NotificationListenerService() {
 
+    companion object {
+        // Latest computed now-playing, cached so the plugin's getNowPlaying pull
+        // can return the current track even when no change event is pending.
+        @Volatile var latest: NowPlaying? = null
+    }
+
     private val msm by lazy { getSystemService(MediaSessionManager::class.java) }
     private val self by lazy { ComponentName(this, MediaMetadataService::class.java) }
     private var lastKey: String? = null
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    // Controllers we have attached callbacks to, RETAINED. A track change within
+    // a session is delivered only via the per-controller callback (the session
+    // list listener fires on set changes, not metadata changes); if the
+    // controllers are not retained they are GC'd and updates silently stop.
+    private val registered = mutableListOf<MediaController>()
 
     private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
-        publish(controllers ?: emptyList())
+        val list = controllers ?: emptyList()
+        registerControllers(list)
+        publish(list)
     }
     private val controllerCb = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) { refresh() }
         override fun onPlaybackStateChanged(state: PlaybackState?) { refresh() }
+        override fun onSessionDestroyed() { refresh() }
     }
 
     override fun onListenerConnected() {
         try {
             msm.addOnActiveSessionsChangedListener(sessionsListener, self)
-            refresh()
+            val controllers = msm.getActiveSessions(self)
+            registerControllers(controllers)
+            publish(controllers)
         } catch (_: Throwable) {}
     }
 
     override fun onListenerDisconnected() {
+        for (c in registered) { try { c.unregisterCallback(controllerCb) } catch (_: Throwable) {} }
+        registered.clear()
         try { msm.removeOnActiveSessionsChangedListener(sessionsListener) } catch (_: Throwable) {}
+        latest = null
+    }
+
+    /** Attach the metadata callback to the current controllers and retain them
+     *  (called only on session-set changes; metadata changes recompute via
+     *  refresh() without re-registering). */
+    private fun registerControllers(controllers: List<MediaController>) {
+        for (c in registered) { try { c.unregisterCallback(controllerCb) } catch (_: Throwable) {} }
+        registered.clear()
+        for (c in controllers) {
+            try { c.registerCallback(controllerCb, mainHandler) } catch (_: Throwable) {}
+            registered.add(c)
+        }
     }
 
     private fun refresh() {
@@ -40,7 +72,6 @@ class MediaMetadataService : NotificationListenerService() {
     }
 
     private fun publish(controllers: List<MediaController>) {
-        for (c in controllers) { try { c.registerCallback(controllerCb) } catch (_: Throwable) {} }
         // getActiveSessions returns most-recent first, so a smaller index is more
         // recent; (size - i) makes a larger lastActive mean more recent.
         val infos = controllers.mapIndexed { i, c ->
@@ -58,6 +89,7 @@ class MediaMetadataService : NotificationListenerService() {
             md?.getString(MediaMetadata.METADATA_KEY_ALBUM),
             md?.let { encodeArt(it) },
         )
+        latest = np                       // cache for the pull, even when unchanged
         val key = np?.let { it.title + "" + it.artist + "" + it.album }
         if (key == lastKey) return
         lastKey = key

@@ -149,6 +149,8 @@ function setRunning(val) {
   state.running = !!val;
   if (!val) exitFullscreenIfActive();
   refreshFullscreenUI();
+  // The now-playing card is a view: its visibility tracks running + state.view.
+  if (typeof updateNowPlayingCard === "function") updateNowPlayingCard();
 }
 
 function isInFullscreen() {
@@ -610,7 +612,6 @@ async function startCaptureAndroid() {
     audio.silentCaptureHandle = await plugin.addListener("silentCapture", onSilentCapture);
     audio.unrestrictedHandle = await plugin.addListener("unrestrictedAvailable", onUnrestrictedAvailable);
     audio.captureLostHandle = await plugin.addListener("captureLost", onCaptureLost);
-    audio.nowPlayingHandle = await plugin.addListener("nowPlayingChanged", onNowPlayingChanged);
   } catch (err) {
     setStatus(`Graph wire-up failed: ${err.message || err}`);
     if (audio.ctx) { try { await audio.ctx.close(); } catch (_e) {} audio.ctx = null; }
@@ -797,8 +798,13 @@ function hideCaptureBanner() {
 }
 
 // ---- Now-playing readout: transient overlay (10s) + dedicated card. DOM only.
+// Treated as a normal view: the card is part of the running visualisation, so
+// it only shows while state.running (like the other views' canvas). The
+// metadata listener is registered once at app init (initNowPlaying), so the
+// readout works whenever notification access is granted, independent of capture.
 let nowPlayingOverlayTimer = null;
 let nowPlayingAccessGranted = false;
+let nowPlayingListenerHandle = null;
 const NOW_PLAYING_OVERLAY_MS = 10000;
 
 function renderNowPlayingInto(el, dto) {
@@ -827,7 +833,7 @@ function renderNowPlayingInto(el, dto) {
 }
 
 function showNowPlayingOverlay(dto) {
-  if (state.view === "nowplaying") return;   // the card already shows it
+  if (state.view === "nowplaying" || !state.running) return;   // card shows it; HUD only while running
   let el = document.getElementById("now-playing-overlay");
   if (!el) { el = document.createElement("div"); el.id = "now-playing-overlay"; document.body.appendChild(el); }
   renderNowPlayingInto(el, dto);
@@ -861,7 +867,9 @@ function renderNowPlayingAccessPrompt(el) {
 function updateNowPlayingCard() {
   let el = document.getElementById("now-playing-card");
   if (!el) { el = document.createElement("div"); el.id = "now-playing-card"; document.body.appendChild(el); }
-  if (state.view !== "nowplaying") { el.hidden = true; return; }
+  // As a view, the card only lives while the visualisation runs; pre-capture
+  // the start screen is up and no view renders.
+  if (state.view !== "nowplaying" || !state.running) { el.hidden = true; return; }
   el.hidden = false;
   const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
   if (plugin && plugin.hasNotificationAccess && !nowPlayingAccessGranted) {
@@ -872,21 +880,11 @@ function updateNowPlayingCard() {
     el.textContent = "";
     const p = document.createElement("div");
     p.className = "np-placeholder";
-    p.textContent = state.running ? "Nothing playing" : "Start capture to see track info";
+    p.textContent = "Nothing playing";
     el.appendChild(p);
     return;
   }
   renderNowPlayingInto(el, state.nowPlaying);
-}
-
-async function refreshNowPlayingAccess() {
-  const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
-  if (!plugin || !plugin.hasNotificationAccess) { nowPlayingAccessGranted = false; return; }
-  try {
-    const r = await plugin.hasNotificationAccess();
-    nowPlayingAccessGranted = !!(r && r.granted);
-  } catch (_e) { nowPlayingAccessGranted = false; }
-  updateNowPlayingCard();
 }
 
 function ingestNowPlaying(dto) {
@@ -900,6 +898,41 @@ function onNowPlayingChanged(e) {
   ingestNowPlaying({
     title: e.title || "", artist: e.artist || "", album: e.album || "", art: e.art || null,
   });
+}
+
+// Pull the current track on demand (view entry, app resume, access granted) so
+// a song that was already playing when we subscribed still shows.
+async function pullNowPlaying() {
+  const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
+  if (!plugin || !plugin.getNowPlaying) return;
+  try {
+    const r = await plugin.getNowPlaying();
+    if (r) ingestNowPlaying({ title: r.title || "", artist: r.artist || "", album: r.album || "", art: r.art || null });
+  } catch (_e) {}
+}
+
+async function refreshNowPlayingAccess() {
+  const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
+  if (!plugin || !plugin.hasNotificationAccess) { nowPlayingAccessGranted = false; return; }
+  try {
+    const r = await plugin.hasNotificationAccess();
+    nowPlayingAccessGranted = !!(r && r.granted);
+  } catch (_e) { nowPlayingAccessGranted = false; }
+  if (nowPlayingAccessGranted) await pullNowPlaying();
+  updateNowPlayingCard();
+}
+
+// Phone-only: registers the metadata listener once at app init, independent of
+// capture. NOT called on the TV (the box has no working metadata service; it
+// consumes now-playing relayed from the phone). Pulling on the TV would clobber
+// the relayed value with the TV's own empty sessions.
+async function initNowPlaying() {
+  const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
+  if (!plugin || !plugin.addListener) return;
+  if (!nowPlayingListenerHandle) {
+    nowPlayingListenerHandle = await plugin.addListener("nowPlayingChanged", onNowPlayingChanged);
+  }
+  await refreshNowPlayingAccess();
 }
 
 async function stopCaptureAndroid(opts) {
@@ -922,12 +955,9 @@ async function stopCaptureAndroid(opts) {
     await audio.captureLostHandle.remove();
     audio.captureLostHandle = null;
   }
-  if (audio.nowPlayingHandle && audio.nowPlayingHandle.remove) {
-    await audio.nowPlayingHandle.remove();
-    audio.nowPlayingHandle = null;
-  }
-  state.nowPlaying = null;
-  updateNowPlayingCard();
+  // The now-playing listener is app-scoped (registered in initNowPlaying), not
+  // capture-scoped, so it is not removed here. setRunning(false) below hides the
+  // card; the current track is NOT cleared (it may still be playing).
   const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScopeAudio;
   if (plugin) {
     try { await plugin.stopCapture(); } catch (_e) {}
@@ -1989,6 +2019,12 @@ async function init() {
         await startTvMode();
         return;   // receive-only; skip all phone capture UI wiring below
       }
+      // Phone only: now-playing reads THIS device's MediaSessions and is the
+      // first view. The TV never does this - the box can't background apps or
+      // capture, so it has no working metadata service; it receives now-playing
+      // relayed from the paired phone (handled in the tvRenderRequest listener).
+      state.view = "nowplaying";
+      initNowPlaying();
       // Defensive: start-screen is the desktop welcome card; it should never
       // be visible on Android. HTML now has it hidden by default so this is
       // belt-and-braces in case the attribute was cleared somewhere.

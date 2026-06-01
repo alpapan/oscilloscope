@@ -176,7 +176,6 @@ class ScopeAudioPlugin : Plugin() {
         context.stopService(intent)
         AudioCaptureService.pluginRef = null
         isCapturing = false
-        emitNowPlayingCleared()
         (bridge?.activity as? MainActivity)?.let { act ->
             act.runOnUiThread { act.setPipAutoEnter(false) }
         }
@@ -301,27 +300,33 @@ class ScopeAudioPlugin : Plugin() {
         call.resolve()
     }
 
-    /** Called by MediaMetadataService on a new track. Forwards to this phone's JS
-     *  and (if paired and capturing) to the TV. Gated on isCapturing so the readout
-     *  only appears while the scope is capturing. Works headless: this runs on the
-     *  native side, so the paired TV is updated even when the phone JS is backgrounded. */
+    /** Pull the current track. Lets JS show a song that was already playing when
+     *  the now-playing view opened (no change event would fire for it). */
+    @PluginMethod
+    fun getNowPlaying(call: PluginCall) {
+        val np = MediaMetadataService.latest
+        val data = JSObject()
+            .put("title", np?.title ?: "")
+            .put("artist", np?.artist ?: "")
+            .put("album", np?.album ?: "")
+        if (np?.art != null) data.put("art", np.art)
+        call.resolve(data)
+    }
+
+    /** Called by MediaMetadataService on a track change (np == null when nothing
+     *  is playing). Forwards to this phone's JS and relays to a paired TV.
+     *  NOT gated on capture: the readout reflects what is playing, independent of
+     *  whether the visualiser is capturing. Works headless (runs native-side). */
     fun emitNowPlaying(np: NowPlaying?) {
-        if (!isCapturing) return
         val data = JSObject()
             .put("title", np?.title ?: "")
             .put("artist", np?.artist ?: "")
             .put("album", np?.album ?: "")
         if (np?.art != null) data.put("art", np.art)
         notifyListeners("nowPlayingChanged", data)
-        if (np != null) sender.sendControl(NowPlayingLogic.encodeMessage(np))
-    }
-
-    private fun emitNowPlayingCleared() {
-        // Not gated on isCapturing: runs as capture stops, to clear the JS state.
-        notifyListeners("nowPlayingChanged", JSObject().put("title", "").put("artist", "").put("album", ""))
-        // Also clear a paired TV (no-op if not connected): when the phone stops
-        // capturing, the TV should drop its readout rather than freeze the card.
-        sender.sendControl(NowPlayingLogic.clearMessage())
+        // Relay to a paired TV (no-op if not connected): the current track, or a
+        // clear when nothing is playing.
+        sender.sendControl(if (np != null) NowPlayingLogic.encodeMessage(np) else NowPlayingLogic.clearMessage())
     }
 
     /** Phone: start NSD browse; each resolved TV is surfaced as a `tvFound` event. */
@@ -347,6 +352,10 @@ class ScopeAudioPlugin : Plugin() {
             if (ok) {
                 com.alpapan.scope.AudioCaptureService.pcmTap = makePcmTap()
                 notifyTvConnected()
+                // Push the current track to the freshly-paired TV (it only learns
+                // now-playing from this phone; without this it would show nothing
+                // until the next track change).
+                emitNowPlaying(MediaMetadataService.latest)
                 call.resolve()
             } else {
                 call.reject("pairing failed")
