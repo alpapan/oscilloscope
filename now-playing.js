@@ -23,6 +23,8 @@ function truncate(s, max) {
   return s.length > max ? s.slice(0, max - 1).trimEnd() + "…" : s;
 }
 
-const api = { isBlank, isNewTrack, formatTrackText, truncate };
-if (typeof module !== "undefined" && module.exports) module.exports = api;
-if (typeof globalThis !== "undefined") globalThis.NowPlaying = api;
+// Unique top-level name: classic <script> tags share one global lexical scope,
+// so a duplicate `const` across files stops the later script from loading.
+const nowPlayingApi = { isBlank, isNewTrack, formatTrackText, truncate };
+if (typeof module !== "undefined" && module.exports) module.exports = nowPlayingApi;
+if (typeof globalThis !== "undefined") globalThis.NowPlaying = nowPlayingApi;

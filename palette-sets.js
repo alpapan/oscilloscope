@@ -23,6 +23,8 @@ function reconcileTheme(view, theme) {
 }
 function isExclusive(theme) { return Object.values(EXCLUSIVE).includes(theme); }
 
-const api = { GENERIC, EXCLUSIVE, eligiblePalettes, nextPalette, reconcileTheme, isExclusive };
-if (typeof module !== "undefined" && module.exports) module.exports = api;
-if (typeof globalThis !== "undefined") globalThis.PaletteSets = api;
+// Unique top-level name: classic <script> tags share one global lexical scope,
+// so a duplicate `const` across files stops the later script from loading.
+const paletteSetsApi = { GENERIC, EXCLUSIVE, eligiblePalettes, nextPalette, reconcileTheme, isExclusive };
+if (typeof module !== "undefined" && module.exports) module.exports = paletteSetsApi;
+if (typeof globalThis !== "undefined") globalThis.PaletteSets = paletteSetsApi;
