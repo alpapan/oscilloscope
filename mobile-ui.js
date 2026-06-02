@@ -78,6 +78,12 @@
     if (auto) auto.checked = !!state.autoGain;
     const keep = document.getElementById("mobile-keepawake");
     if (keep) keep.checked = !!state.keepScreenOn;
+    const capSeg = document.getElementById("mobile-capture-seg");
+    if (capSeg) {
+      capSeg.querySelectorAll(".capture-opt").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.mic === String(!!state.micMode));
+      });
+    }
     for (const band of ["bass", "mid", "treb"]) {
       const el = document.getElementById(`mobile-eq-${band}`);
       if (el) el.value = String(state.bandGain[band]);
@@ -168,14 +174,23 @@
         }
       });
     }
-    const micToggle = document.getElementById("mobile-micmode");
-    if (micToggle) {
-      micToggle.checked = !!state.micMode;
-      micToggle.addEventListener("change", e => {
+    const captureSeg = document.getElementById("mobile-capture-seg");
+    if (captureSeg) {
+      function updateCaptureSeg() {
+        captureSeg.querySelectorAll(".capture-opt").forEach(btn => {
+          btn.classList.toggle("active", btn.dataset.mic === String(!!state.micMode));
+        });
+      }
+      updateCaptureSeg();
+      captureSeg.addEventListener("click", e => {
+        const btn = e.target.closest(".capture-opt");
+        if (!btn) return;
+        const newMicMode = btn.dataset.mic === "true";
         // While capturing this switches the source live (and redirects away
         // from now-playing); pre-capture it just records the preference.
-        if (onMicToggle) onMicToggle(!!e.target.checked);
-        else { state.micMode = !!e.target.checked; applyState(); }
+        if (onMicToggle) onMicToggle(newMicMode);
+        else { state.micMode = newMicMode; applyState(); }
+        updateCaptureSeg();
       });
     }
     const micAutoToggle = document.getElementById("mobile-micmode-auto");

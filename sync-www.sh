@@ -36,3 +36,4 @@ do
     mkdir -p "$DEST/$(dirname "$f")"
     cp -f "$ROOT/$f" "$DEST/$f"
 done
+npx cap sync android

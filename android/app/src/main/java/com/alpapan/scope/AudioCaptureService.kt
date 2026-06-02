@@ -343,8 +343,7 @@ class AudioCaptureService : Service() {
             if (!s.contains("FLAG_NO_MEDIA_PROJECTION") &&
                 (s.contains("CONTENT_TYPE_MUSIC") ||
                  s.contains("CONTENT_TYPE_MOVIE") ||
-                 s.contains("CONTENT_TYPE_SPEECH") ||
-                 s.contains("CONTENT_TYPE_UNKNOWN"))) {
+                 s.contains("CONTENT_TYPE_SPEECH"))) {
                 return true
             }
         }

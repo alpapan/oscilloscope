@@ -193,7 +193,13 @@
       <label class="toggle"><input id="mobile-keepawake" type="checkbox" checked> Keep screen on</label>
     </section>
     <section>
-      <label class="toggle"><input id="mobile-micmode" type="checkbox"> Microphone capture (for DRM-protected music; e.g. Spotify)</label>
+      <div class="capture-row">
+        <span class="capture-label">Capture</span>
+        <div class="capture-seg" id="mobile-capture-seg">
+          <button type="button" class="capture-opt" data-mic="false">system</button>
+          <button type="button" class="capture-opt" data-mic="true">mic</button>
+        </div>
+      </div>
     </section>
     <section>
       <label class="toggle"><input id="mobile-micmode-auto" type="checkbox"> Auto-switch to microphone when source is protected</label>
