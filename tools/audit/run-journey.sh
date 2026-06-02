@@ -54,9 +54,9 @@ if ! ( cd android && "$GRADLEW" --no-daemon assembleRelease ); then
   EXPECTS_RELEASE_SIGNED=false
 fi
 if [[ "$EXPECTS_RELEASE_SIGNED" == "true" ]]; then
-  APK="$(find "$APK_BASE/release" -name 'app-release*.apk' -type f -print -quit)"
+  APK="$(find "$APK_BASE/release" -name '*.apk' -type f -print -quit)"
 else
-  APK="$(find "$APK_BASE/debug" -name 'app-debug*.apk' -type f -print -quit)"
+  APK="$(find "$APK_BASE/debug" -name '*.apk' -type f -print -quit)"
 fi
 [[ -n "$APK" ]] || { echo "No APK produced." >&2; exit 1; }
 
@@ -86,25 +86,24 @@ while true; do
   fi
 done
 
-# Scope device-targeted tools (e.g. `android screen capture`, which has no -s
-# flag) to this emulator, since LAN/USB devices may also be attached.
-export ANDROID_SERIAL="$EMU_SERIAL"
-
 # Install (uninstall first when downgrading to a debug-signed APK).
 if [[ "$EXPECTS_RELEASE_SIGNED" == "false" ]]; then
   "$ADB" -s "$EMU_SERIAL" uninstall com.alpapan.scope || true
 fi
 "$ADB" -s "$EMU_SERIAL" install -r "$APK"
 
-# Annotated screenshot with a plain fallback. Assert the PNG is non-empty so a
-# silent capture failure surfaces instead of leaking a blank into the report.
-ANNOTATED="${OUT_DIR}/${JOURNEY_ID}-annotated.png"
-PLAIN="${OUT_DIR}/${JOURNEY_ID}-plain.png"
-if ! android screen capture --annotate -o "$ANNOTATED" || [[ ! -s "$ANNOTATED" ]]; then
-  echo "annotate failed or produced empty file; falling back to plain screenshot." >&2
-  android screen capture -o "$PLAIN"
-  [[ -s "$PLAIN" ]] || { echo "ERROR: plain screenshot also failed." >&2; exit 3; }
-fi
+# Launch the app so the screenshot shows it (install alone leaves the launcher
+# up), then give the Capacitor WebView time to render. The WebView package can
+# still be settling right after a cold boot, so allow generous headroom.
+"$ADB" -s "$EMU_SERIAL" shell monkey -p com.alpapan.scope -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+sleep 10
+
+# Capture a screenshot via the emulator's adb (serial-scoped, since other
+# devices may be attached). `android screen capture` cannot target a specific
+# device when multiple are online, so use adb screencap directly.
+SHOT="${OUT_DIR}/${JOURNEY_ID}.png"
+"$ADB" -s "$EMU_SERIAL" exec-out screencap -p > "$SHOT"
+[[ -s "$SHOT" ]] || { echo "ERROR: screenshot failed." >&2; exit 3; }
 
 "$ADB" -s "$EMU_SERIAL" emu kill 2>/dev/null || true
 wait "$EMU_PID" 2>/dev/null || true

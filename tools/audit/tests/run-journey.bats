@@ -19,20 +19,6 @@ setup() {
 exit 0
 EOF
 
-  # android shim: succeeds, and for `screen capture` writes a non-empty PNG to
-  # the -o target so the script's [[ -s ]] check passes on the annotate path.
-  cat > "${BATS_TEST_TMPDIR}/android" <<'EOF'
-#!/usr/bin/env bash
-case "$*" in
-  *"screen capture"*)
-    out=""
-    while [[ $# -gt 0 ]]; do [[ "$1" == "-o" ]] && out="$2"; shift; done
-    [[ -n "$out" ]] && { mkdir -p "$(dirname "$out")"; printf 'png' > "$out"; }
-    ;;
-esac
-exit 0
-EOF
-
   # No-op sleep so boot-wait/sleep calls don't really block.
   cat > "${BATS_TEST_TMPDIR}/sleep" <<'EOF'
 #!/usr/bin/env bash
@@ -48,6 +34,8 @@ while [[ "$1" == "-s" ]]; do shift 2; done
 case "$*" in
   devices*)                           echo "emulator-5554	device" ;;
   "shell getprop sys.boot_completed") echo "1" ;;
+  "exec-out screencap -p")            printf 'PNGDATA' ;;
+  "shell monkey "*)                   touch "${BATS_TEST_TMPDIR}/launched.flag" ;;
   install*|"install -r "*)            touch "${BATS_TEST_TMPDIR}/installed.flag" ;;
   uninstall*)                         touch "${BATS_TEST_TMPDIR}/uninstalled.flag" ;;
 esac
@@ -70,7 +58,7 @@ EOF
 exit 0
 EOF
 
-  chmod +x "${BATS_TEST_TMPDIR}"/{npm,android,sleep,gradlew} \
+  chmod +x "${BATS_TEST_TMPDIR}"/{npm,sleep,gradlew} \
            "${BATS_TEST_TMPDIR}/Sdk/platform-tools/adb"
 
   # Redirect ${HOME}/Android/Sdk/platform-tools/adb onto the shim above.
@@ -78,8 +66,10 @@ EOF
   ln -fs "." "${BATS_TEST_TMPDIR}/Android"
 
   # Stand-in release APK under the injected APK base (never the real build dir).
+  # Named like the project's real artifact (scope-<version>.apk), NOT gradle's
+  # default app-release.apk - the find pattern must not assume the default name.
   mkdir -p "${SCOPE_APK_BASE}/release"
-  echo "stub" > "${SCOPE_APK_BASE}/release/app-release.apk"
+  echo "stub" > "${SCOPE_APK_BASE}/release/scope-0.6.apk"
 }
 
 @test "refuses with exit 2 when journey is marked emulator:false" {
@@ -97,9 +87,9 @@ EOF
 }
 
 @test "falls back to assembleDebug when assembleRelease fails, and uninstalls first" {
-  rm -f "${SCOPE_APK_BASE}/release/app-release.apk"
+  rm -f "${SCOPE_APK_BASE}/release/scope-0.6.apk"
   mkdir -p "${SCOPE_APK_BASE}/debug"
-  echo "stub" > "${SCOPE_APK_BASE}/debug/app-debug.apk"
+  echo "stub" > "${SCOPE_APK_BASE}/debug/scope-0.6.apk"
   run env FAKE_GRADLE_RELEASE_EXIT=1 "${REPO_ROOT}/tools/audit/run-journey.sh" scope-api36 \
     "${REPO_ROOT}/docs/audits/2026-06-audit/journeys/drawer-capture-toggle.xml"
   [ "$status" -eq 0 ]
@@ -119,6 +109,7 @@ case "$*" in
     echo "$n" > "$COUNT_FILE"
     [ "$n" -ge 2 ] && echo "1" || echo ""
     ;;
+  "exec-out screencap -p") printf 'PNGDATA' ;;
   install*|"install -r "*) touch "${BATS_TEST_TMPDIR}/installed.flag" ;;
 esac
 EOF
@@ -131,24 +122,12 @@ EOF
   [ "$(cat "${BATS_TEST_TMPDIR}/boot-calls")" -ge 2 ]
 }
 
-@test "falls back to plain screenshot when annotate fails" {
-  cat > "${BATS_TEST_TMPDIR}/android" <<'EOF'
-#!/usr/bin/env bash
-case "$*" in
-  *"capture --annotate"*) exit 1 ;;
-  *"screen capture"*)
-    out=""
-    while [[ $# -gt 0 ]]; do [[ "$1" == "-o" ]] && out="$2"; shift; done
-    [[ -n "$out" ]] && { mkdir -p "$(dirname "$out")"; printf 'png' > "$out"; }
-    ;;
-esac
-exit 0
-EOF
-  chmod +x "${BATS_TEST_TMPDIR}/android"
+@test "launches the app, then captures a non-empty screenshot via adb screencap" {
   run "${REPO_ROOT}/tools/audit/run-journey.sh" scope-api36 \
     "${REPO_ROOT}/docs/audits/2026-06-audit/journeys/drawer-capture-toggle.xml"
   [ "$status" -eq 0 ]
-  find "${SCOPE_OUT_BASE}/scope-api36" -name '*-plain.png' -type f | grep -q .
+  [ -f "${BATS_TEST_TMPDIR}/launched.flag" ]
+  find "${SCOPE_OUT_BASE}/scope-api36" -name '*.png' -type f -size +0c | grep -q .
 }
 
 @test "exits non-zero with a clear error when the journey file does not exist" {

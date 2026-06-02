@@ -21,11 +21,21 @@ EOF
 printf '%s\n' "$*" >> "${GCLOUD_LOG}"
 exit 0
 EOF
-  chmod +x "${BATS_TEST_TMPDIR}"/{npm,gcloud}
+  # gradlew shim, injected via GRADLEW (an explicit ./gradlew bypasses a
+  # PATH-based stub). Only reached if no APK is present; with the stub below it
+  # is not, but the seam keeps a stray build from invoking the real wrapper.
+  export GRADLEW="${BATS_TEST_TMPDIR}/gradlew"
+  cat > "${BATS_TEST_TMPDIR}/gradlew" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "${BATS_TEST_TMPDIR}"/{npm,gcloud,gradlew}
 
   # Stand-in release APK under the injected APK base (never the real build dir).
+  # Named like the project's real artifact (scope-<version>.apk), NOT gradle's
+  # default app-release.apk.
   mkdir -p "${SCOPE_APK_BASE}/release"
-  echo "stub" > "${SCOPE_APK_BASE}/release/app-release.apk"
+  echo "stub" > "${SCOPE_APK_BASE}/release/scope-0.6.apk"
 }
 
 @test "exits non-zero when lint fails before invoking gcloud" {

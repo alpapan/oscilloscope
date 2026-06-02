@@ -19,18 +19,20 @@ cd "$REPO_ROOT"
 # its temp dir so tests never read or write the real build/output trees.
 APK_BASE="${SCOPE_APK_BASE:-android/app/build/outputs/apk}"
 RESULTS_BASE="${SCOPE_FTL_RESULTS_BASE:-docs/audits/2026-06-audit/ftl-results}"
+GRADLEW="${GRADLEW:-./gradlew}"
 
 # Lint + typecheck must run before gradle.
 npm run lint
 npm run typecheck
 
-# Build with debug fallback (only when no APK is present yet).
-APK_PATH="${APK_BASE}/release/app-release.apk"
-if [[ ! -f "$APK_PATH" ]]; then
-  ( cd android && ./gradlew --no-daemon assembleRelease ) || \
-    ( cd android && ./gradlew --no-daemon assembleDebug )
+# Build with debug fallback (only when no APK is present yet). The project names
+# its artifact scope-<version>.apk, so match any *.apk in the build tree.
+APK="$(find "$APK_BASE" -name '*.apk' -type f -print -quit)"
+if [[ -z "$APK" ]]; then
+  ( cd android && "$GRADLEW" --no-daemon assembleRelease ) || \
+    ( cd android && "$GRADLEW" --no-daemon assembleDebug )
+  APK="$(find "$APK_BASE" -name '*.apk' -type f -print -quit)"
 fi
-APK="$(find "$APK_BASE" -name 'app-*.apk' -type f -print -quit)"
 if [[ -z "$APK" ]]; then
   cat >&2 <<'MSG'
 ERROR: Both assembleRelease AND assembleDebug failed; no APK produced.
