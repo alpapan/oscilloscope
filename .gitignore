@@ -43,5 +43,6 @@ play-listing/
 
 # Ignore docs/ broadly (working + generated docs stay local). Published docs
 # are re-included by explicit negations below this line.
-docs/
+docs/*
 !docs/privacy-policy.md
+!docs/build-signed.md
