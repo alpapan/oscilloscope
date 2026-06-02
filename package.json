@@ -103,5 +103,8 @@
     "globals": "^17.6.0",
     "http-server": "^14.1.1",
     "typescript": "^6.0.3"
+  },
+  "overrides": {
+    "tmp": "^0.2.6"
   }
 }
