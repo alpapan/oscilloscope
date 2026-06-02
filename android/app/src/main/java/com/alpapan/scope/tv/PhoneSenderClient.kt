@@ -1,5 +1,4 @@
 package com.alpapan.scope.tv
-import org.json.JSONObject
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.ArrayBlockingQueue
@@ -13,22 +12,27 @@ class PhoneSenderClient(private val onFailed: () -> Unit = {}) {
     var onControl: ((String) -> Unit)? = null
     fun connect(host: String, port: Int, code: String): Boolean {
         val s = Socket(); s.connect(InetSocketAddress(host, port), 4000); socket = s
+        s.soTimeout = 5000                                   // handshake deadline (F6): a silent TV must not hang us
+        val reader = FrameReader(s.getInputStream())
         val out = s.getOutputStream()
-        out.write(FrameCodec.encode(byteArrayOf(0) + JSONObject().put("type","hello").put("v",1).put("code",code).toString().toByteArray())); out.flush()
-        val dec = FrameDecoder(); val rb = ByteArray(256); var reply: String? = null
-        while (reply == null) { val n = s.getInputStream().read(rb); if (n<0) break; dec.feed(rb.copyOfRange(0,n)).firstOrNull()?.let { reply = String(it.copyOfRange(1,it.size), Charsets.UTF_8) } }
-        connected = try { reply != null && JSONObject(reply).optBoolean("ok", false) } catch (_: Throwable) { false }
-        if (!connected) { close(); return false }
+        val ch = Handshake.phoneConnect(reader, out, code) ?: run { close(); return false }
+        connected = true
+        // Steady state: blocking reads. The TV->phone control channel is sparse
+        // (only on TV-side user action), so a read timeout would false-disconnect
+        // an idle-but-healthy pairing. A dead TV is detected by the send thread:
+        // the phone streams analysis frames continuously, so out.write throws
+        // promptly when the TV vanishes and fires fail().
+        s.soTimeout = 0
         running = true
         thread(name="tv-send") {
-            try { while (running) { val p = queue.poll(500, TimeUnit.MILLISECONDS) ?: continue; out.write(FrameCodec.encode(p)) } }
+            try { while (running) { val p = queue.poll(500, TimeUnit.MILLISECONDS) ?: continue; out.write(FrameCodec.encode(ch.seal(p))) } }
             catch (_: Throwable) {} finally { fail() }
         }
         thread(name = "tv-recv") {
-            val rdec = FrameDecoder(); val rrb = ByteArray(4096); val ins = socket!!.getInputStream()
-            try { while (running) { val n = ins.read(rrb); if (n < 0) break
-                for (f in rdec.feed(rrb.copyOfRange(0, n)))
-                    if (f.isNotEmpty() && f[0].toInt() == 0) onControl?.invoke(String(f.copyOfRange(1, f.size), Charsets.UTF_8))
+            try { while (running) {
+                val frame = reader.next() ?: break           // reuse the SAME reader so handshake leftover is not lost
+                val plain = try { ch.open(frame) } catch (_: Throwable) { continue }   // drop tampered/replayed
+                if (plain.isNotEmpty() && plain[0].toInt() == 0) onControl?.invoke(String(plain.copyOfRange(1, plain.size), Charsets.UTF_8))
             } } catch (_: Throwable) {} finally { fail() }
         }
         return true

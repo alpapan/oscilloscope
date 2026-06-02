@@ -46,3 +46,4 @@ play-listing/
 docs/*
 !docs/privacy-policy.md
 !docs/build-signed.md
+!docs/SECURITY.md

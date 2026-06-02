@@ -20,4 +20,21 @@ class RenderSpecClampTest {
         assertEquals(16384, RenderSpecClamp.clampFftSize(32768))
         assertEquals(16384, RenderSpecClamp.clampFftSize(99999))
     }
+    @Test fun clampViewToKnownRange() {
+        assertEquals(0, RenderSpecClamp.clampView(-3))
+        assertEquals(11, RenderSpecClamp.clampView(999))
+        assertEquals(5, RenderSpecClamp.clampView(5))
+    }
+    @Test fun clampWaveformPoints() {
+        assertEquals(16, RenderSpecClamp.clampWaveformPoints(1))
+        assertEquals(16384, RenderSpecClamp.clampWaveformPoints(Int.MAX_VALUE))
+    }
+    @Test fun clampFftBins() {
+        assertEquals(16, RenderSpecClamp.clampFftBins(0))
+        assertEquals(16384, RenderSpecClamp.clampFftBins(Int.MAX_VALUE))
+    }
+    @Test fun clampChannels() {
+        assertEquals(1, RenderSpecClamp.clampChannels(0))
+        assertEquals(2, RenderSpecClamp.clampChannels(9))
+    }
 }

@@ -37,7 +37,14 @@ const val MAX_FFT_SIZE = 16384
 const val WIRE_DOWNSAMPLE_FACTOR: Float = 1f   // ratio output/input; 1f = no downsample (TV waveform equals phone waveform)
 
 object RenderSpecClamp {
+    // MAX_VIEW_ID must equal view-ids.js VIEW_ORDER.length - 1 (currently 12 views -> 11).
+    // Update BOTH this constant and view-ids.js together if a view is added/removed.
+    const val MAX_VIEW_ID = 11
     fun clampFftSize(raw: Int): Int = raw.coerceAtMost(MAX_FFT_SIZE).coerceAtLeast(64)
+    fun clampView(raw: Int): Int = raw.coerceIn(0, MAX_VIEW_ID)
+    fun clampWaveformPoints(raw: Int): Int = raw.coerceIn(16, MAX_FFT_SIZE)
+    fun clampFftBins(raw: Int): Int = raw.coerceIn(16, MAX_FFT_SIZE)
+    fun clampChannels(raw: Int): Int = raw.coerceIn(1, 2)
 }
 
 data class RenderSpec(val view: Int, val waveformPoints: Int, val fftBins: Int, val channels: Int, val fftSize: Int = 2048)
@@ -416,6 +423,14 @@ class ScopeAudioPlugin : Plugin() {
         call.resolve()
     }
 
+    /** TV: drop the current phone pairing (remote Back). Closing the socket makes
+     *  the read loop throw -> normal disconnect cleanup re-advertises a fresh code. */
+    @PluginMethod
+    fun tvDisconnectClient(call: PluginCall) {
+        com.alpapan.scope.tv.TvReceiverService.disconnectActive()
+        call.resolve()
+    }
+
     @PluginMethod
     fun mediaNext(call: PluginCall) {
         val c = MediaMetadataService.active
@@ -451,10 +466,10 @@ class ScopeAudioPlugin : Plugin() {
         try {
             val o = JSONObject(json)
             spec = RenderSpec(
-                o.optInt("view", 0),
-                o.optInt("waveformPoints", 512),
-                o.optInt("fftBins", 256),
-                o.optInt("channels", 2),
+                RenderSpecClamp.clampView(o.optInt("view", 0)),
+                RenderSpecClamp.clampWaveformPoints(o.optInt("waveformPoints", 512)),
+                RenderSpecClamp.clampFftBins(o.optInt("fftBins", 256)),
+                RenderSpecClamp.clampChannels(o.optInt("channels", 2)),
                 RenderSpecClamp.clampFftSize(o.optInt("fftSize", 2048)),
             )
         } catch (_: Throwable) {}

@@ -1051,7 +1051,7 @@ function makeTvAnalyser(getTime, getFreq) {
 // Pure: builds the two overlay lines. `main` is the pair code (or a status
 // message); `sub` is the LAN address a phone can type when discovery fails.
 function pairOverlayLines({ text, ip, port }) {
-  const isCode = /^\d{4}$/.test(String(text));
+  const isCode = /^\d{6}$/.test(String(text));
   const main = isCode ? `Pair code: ${text}` : String(text);
   const sub = ip ? `${ip}:${port}` : "";
   return { main, sub };
@@ -1204,9 +1204,9 @@ function renderTvList(found) {
   modal.appendChild(cancel);
 }
 
-// Keep only digits, capped at 4 - the pairing code is always 4 digits.
+// Keep only digits, capped at 6 - the pairing code is always 6 digits.
 function sanitizePairCode(raw) {
-  return String(raw == null ? "" : raw).replace(/\D/g, "").slice(0, 4);
+  return String(raw == null ? "" : raw).replace(/\D/g, "").slice(0, 6);
 }
 
 // Horizontal swipe maps to media transport when listening to a MediaSession,
@@ -1231,7 +1231,7 @@ if (typeof window !== "undefined") {
 
 // In-DOM numeric code entry. window.prompt cannot request a numeric keyboard
 // or reliably autofocus, so build a small modal whose input raises the digits
-// soft-keyboard on focus. Resolves to the 4-digit string, or null on cancel.
+// soft-keyboard on focus. Resolves to the 6-digit string, or null on cancel.
 function promptPairCode() {
   return new Promise((resolve) => {
     if (typeof document === "undefined") { resolve(null); return; }
@@ -1239,12 +1239,12 @@ function promptPairCode() {
     modal.id = "tv-code-modal";
     const title = document.createElement("div");
     title.className = "tv-connect-title";
-    title.textContent = "Enter the 4-digit code shown on the TV";
+    title.textContent = "Enter the 6-digit code shown on the TV";
     const input = document.createElement("input");
     input.id = "tv-code-input";
     input.type = "tel";
     input.inputMode = "numeric";
-    input.maxLength = 4;
+    input.maxLength = 6;
     input.setAttribute("pattern", "[0-9]*");
     input.setAttribute("autocomplete", "one-time-code");
     input.addEventListener("input", () => { input.value = sanitizePairCode(input.value); });

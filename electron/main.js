@@ -30,6 +30,13 @@ function createWindow() {
 
   win.loadFile(path.join(__dirname, "..", "index.html"));
 
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (e, url) => {
+    const target = new URL(url);
+    const here = new URL(win.webContents.getURL());
+    if (target.origin !== here.origin) e.preventDefault();
+  });
+
   // App menu kept small: File > Exit, Help > Open repo.
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     {
@@ -46,7 +53,7 @@ function createWindow() {
       submenu: [
         {
           label: "Open project page",
-          click: () => shell.openExternal("https://github.com/"),
+          click: () => shell.openExternal("https://github.com/alpapan/oscilloscope"),
         },
       ],
     },
