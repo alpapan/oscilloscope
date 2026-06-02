@@ -366,23 +366,23 @@ body.drawer-open #mobile-backdrop {
 #mobile-drawer {
   position: fixed;
   top: 0;
+  left: 0;
   right: 0;
-  bottom: 0;
-  width: min(80vw, 360px);
+  max-height: 85vh;
   padding: env(safe-area-inset-top, 16px) 20px 20px;
   background: var(--bg);
   color: var(--fg);
-  border-left: 1px solid var(--fg);
+  border-bottom: 1px solid var(--fg);
   display: flex;
   flex-direction: column;
   gap: 20px;
   overflow-y: auto;
-  transform: translateX(100%);
+  transform: translateY(-100%);
   transition: transform 220ms ease;
   z-index: 9100;
   font-family: system-ui, -apple-system, sans-serif;
 }
-body.drawer-open #mobile-drawer { transform: translateX(0); }
+body.drawer-open #mobile-drawer { transform: translateY(0); }
 
 #mobile-drawer section { display: flex; flex-direction: column; gap: 8px; }
 #mobile-drawer h2 {

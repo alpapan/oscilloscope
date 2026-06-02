@@ -416,6 +416,20 @@ class ScopeAudioPlugin : Plugin() {
         call.resolve()
     }
 
+    @PluginMethod
+    fun mediaNext(call: PluginCall) {
+        val c = MediaMetadataService.active
+        try { c?.transportControls?.skipToNext() } catch (_: Throwable) {}
+        call.resolve(JSObject().put("ok", c != null))
+    }
+
+    @PluginMethod
+    fun mediaPrevious(call: PluginCall) {
+        val c = MediaMetadataService.active
+        try { c?.transportControls?.skipToPrevious() } catch (_: Throwable) {}
+        call.resolve(JSObject().put("ok", c != null))
+    }
+
     fun notifyTvConnected() = notifyListeners("tvConnected", JSObject())
     fun notifyTvDisconnected() {
         com.alpapan.scope.AudioCaptureService.pcmTap = null

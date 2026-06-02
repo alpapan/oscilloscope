@@ -1,42 +1,38 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const { classifySwipe } = require("../swipe-detector.js");
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { classifySwipe } = require('../swipe-detector.js');
+const FULL = { x0: 200, y0: 400, canvasWidth: 1000, canvasHeight: 2000 };
 
-test("rightward horizontal swipe of 100 px returns 'right'", () => {
-  assert.equal(classifySwipe(0, 0, 100, 5), "right");
+test('downward swipe from mid-screen is "down"', () => {
+  assert.equal(classifySwipe(0, 0, 5, 120, FULL), 'down');
+});
+test('upward swipe from mid-screen is "up"', () => {
+  assert.equal(classifySwipe(0, 0, -5, -120, FULL), 'up');
+});
+test('vertical swipe starting at the top edge is rejected (notification shade)', () => {
+  assert.equal(classifySwipe(0, 0, 0, 120, { x0: 200, y0: 10, canvasWidth: 1000, canvasHeight: 2000 }), 'none');
+});
+test('vertical swipe starting at the bottom edge is rejected (nav gesture)', () => {
+  assert.equal(classifySwipe(0, 0, 0, -120, { x0: 200, y0: 1990, canvasWidth: 1000, canvasHeight: 2000 }), 'none');
+});
+test('horizontal left/right still work (regression)', () => {
+  assert.equal(classifySwipe(0, 0, 120, 5, FULL), 'right');
+  assert.equal(classifySwipe(0, 0, -120, 5, FULL), 'left');
+});
+test('horizontal swipe at side edge still rejected (regression)', () => {
+  assert.equal(classifySwipe(0, 0, 120, 5, { x0: 10, y0: 400, canvasWidth: 1000, canvasHeight: 2000 }), 'none');
 });
 
-test("leftward horizontal swipe of 100 px returns 'left'", () => {
-  assert.equal(classifySwipe(0, 0, -100, 5), "left");
+// Threshold + dominance guards, mirrored on both axes.
+test('tiny horizontal motion (under MIN_DISTANCE) returns "none"', () => {
+  assert.equal(classifySwipe(0, 0, 20, 5), 'none');
 });
-
-test("vertical-dominant motion returns 'none'", () => {
-  assert.equal(classifySwipe(0, 0, 30, 200), "none");
+test('tiny vertical motion (under MIN_DISTANCE) returns "none"', () => {
+  assert.equal(classifySwipe(0, 0, 5, 20, FULL), 'none');
 });
-
-test("tiny motion (under threshold) returns 'none'", () => {
-  assert.equal(classifySwipe(0, 0, 20, 5), "none");
+test('horizontal not 1.5x dominant returns "none"', () => {
+  assert.equal(classifySwipe(0, 0, 60, 50), 'none');   // ratio 1.2 < 1.5
 });
-
-test("near-diagonal but slightly horizontal-dominant returns 'none' (must be 1.5x)", () => {
-  // 60 horizontal, 50 vertical: horizontal-dominant but ratio 1.2 < 1.5
-  assert.equal(classifySwipe(0, 0, 60, 50), "none");
-});
-
-test("clearly horizontal-dominant 1.5x or more returns the direction", () => {
-  assert.equal(classifySwipe(0, 0, 75, 50), "right");
-  assert.equal(classifySwipe(0, 0, -75, 50), "left");
-});
-
-test("edge-zone swipes (within ~32 px of left or right edge of canvas) return 'none'", () => {
-  // 8 px from left edge of an 800-wide canvas
-  assert.equal(classifySwipe(0, 0, 100, 5, { x0: 8, canvasWidth: 800 }), "none");
-  // 24 px from left edge - still inside the (now wider) deadzone
-  assert.equal(classifySwipe(0, 0, 100, 5, { x0: 24, canvasWidth: 800 }), "none");
-  // 8 px from right edge
-  assert.equal(classifySwipe(0, 0, -100, 5, { x0: 792, canvasWidth: 800 }), "none");
-  // 24 px from right edge - still inside the deadzone
-  assert.equal(classifySwipe(0, 0, -100, 5, { x0: 776, canvasWidth: 800 }), "none");
-  // Mid-canvas: still detects
-  assert.equal(classifySwipe(0, 0, 100, 5, { x0: 400, canvasWidth: 800 }), "right");
+test('vertical not 1.5x dominant returns "none"', () => {
+  assert.equal(classifySwipe(0, 0, 50, 60, FULL), 'none');   // ratio 1.2 < 1.5
 });

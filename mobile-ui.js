@@ -84,6 +84,24 @@
     }
   }
 
+  // Horizontal swipe on the canvas: media transport in MediaSession mode,
+  // mic sensitivity in acoustic mode. Decision lives in window.swipeAction.
+  function handleHorizontalSwipe(dir, state, applyState) {
+    const action = window.swipeAction(dir, state.micMode);
+    if (action === "next" || action === "prev") {
+      const plugin = window.Capacitor?.Plugins?.ScopeAudio;
+      if (!plugin) return;
+      (action === "next" ? plugin.mediaNext() : plugin.mediaPrevious())
+        .then(r => showToast(r && r.ok ? (action === "next" ? "Next track" : "Previous track") : "No media app"))
+        .catch(() => {});
+    } else if (action === "sens-down" || action === "sens-up") {
+      state.sensitivity = window.stepSensitivity(state.sensitivity, action === "sens-up" ? +1 : -1);
+      applyState();
+      refreshDrawer(state);
+      showToast("Sensitivity " + state.sensitivity.toFixed(2));
+    }
+  }
+
   function wireDrawer(state, applyState, onMicToggle) {
     document.querySelectorAll("#mobile-theme-chips .chip").forEach(b => {
       b.addEventListener("click", () => {
@@ -263,14 +281,14 @@
 
   function wireGestures(canvas, state, applyState) {
     // Canvas gestures:
-    //   - Double-tap: cycle view (replaced earlier swipe-right which fought
-    //     the Android system back gesture from the screen edge).
+    //   - Double-tap: cycle view.
     //   - Single-tap: cycle palette.
-    //   - Swipe-left: open the settings drawer. Edge deadzone in
-    //     classifySwipe rejects swipes starting near either screen edge so
-    //     the system back-gesture wins uncontested in that zone.
-    // Backdrop gestures (drawer open): tap closes the drawer; swipes are
-    // ignored because the backdrop tap handler is already wired.
+    //   - Swipe-down: open the settings drawer (a top sheet).
+    //   - Swipe-left/right: media next/prev, or mic sensitivity in mic mode.
+    //     Vertical edge deadzones in classifySwipe reject swipes starting near
+    //     the top (notification shade) or bottom (nav gesture); horizontal
+    //     deadzones reject the left/right system back-gesture zones.
+    // Backdrop gestures (drawer open): tap or swipe-up closes the drawer.
     let x0 = 0, y0 = 0;
     let lastTapTime = 0;
     let lastTapX = 0, lastTapY = 0;
@@ -314,12 +332,15 @@
         return;
       }
 
-      // Real swipe: only swipe-left to open drawer is recognised on canvas.
+      // Real swipe: down opens the drawer; left/right drive media/sensitivity.
       const dir = window.classifySwipe(x0, y0, dx, dy, {
         x0,
+        y0,
         canvasWidth: canvas.clientWidth,
+        canvasHeight: canvas.clientHeight,
       });
-      if (dir === "left") openDrawer();
+      if (dir === "down") openDrawer();
+      else if (dir === "left" || dir === "right") handleHorizontalSwipe(dir, state, applyState);
     }
 
     canvas.addEventListener("touchstart", onStart, { passive: true });
@@ -334,16 +355,21 @@
         const t = e.changedTouches[0];
         const dx = t.clientX - x0;
         const dy = t.clientY - y0;
-        const dir = window.classifySwipe(x0, y0, dx, dy, { x0, canvasWidth: window.innerWidth });
-        if (dir === "left") openDrawer();
+        const dir = window.classifySwipe(x0, y0, dx, dy, {
+          x0,
+          y0,
+          canvasWidth: window.innerWidth,
+          canvasHeight: window.innerHeight,
+        });
+        if (dir === "down") openDrawer();   // pre-capture: open settings; no media swipe yet
       }
       startCard.addEventListener("touchstart", onStart, { passive: true });
       startCard.addEventListener("touchend", onEndStart, { passive: true });
     }
 
-    // Backdrop (visible while drawer is open): swipe LTR closes the drawer,
-    // mirroring the swipe-RTL-opens gesture on the canvas. Same edge-deadzone
-    // discipline so the Android system back-gesture wins near screen edges.
+    // Backdrop (visible while drawer is open): swipe up closes the drawer,
+    // mirroring the swipe-down-opens gesture on the canvas. Same edge-deadzone
+    // discipline so the system gesture wins near the top/bottom edges.
     const backdrop = document.getElementById("mobile-backdrop");
     if (backdrop) {
       function onEndBackdrop(e) {
@@ -352,9 +378,11 @@
         const dy = t.clientY - y0;
         const dir = window.classifySwipe(x0, y0, dx, dy, {
           x0,
+          y0,
           canvasWidth: window.innerWidth,
+          canvasHeight: window.innerHeight,
         });
-        if (dir === "right") closeDrawer();
+        if (dir === "up") closeDrawer();
       }
       backdrop.addEventListener("touchstart", onStart, { passive: true });
       backdrop.addEventListener("touchend", onEndBackdrop, { passive: true });

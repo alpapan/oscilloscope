@@ -1209,6 +1209,26 @@ function sanitizePairCode(raw) {
   return String(raw == null ? "" : raw).replace(/\D/g, "").slice(0, 4);
 }
 
+// Horizontal swipe maps to media transport when listening to a MediaSession,
+// or to mic sensitivity when capturing acoustically (no MediaSession to drive).
+function swipeAction(dir, micMode) {
+  if (dir === "left") return micMode ? "sens-down" : "next";
+  if (dir === "right") return micMode ? "sens-up" : "prev";
+  return "none";
+}
+function stepSensitivity(cur, dir) {
+  const v = (typeof cur === "number" ? cur : 1) + dir * 0.1;
+  return Math.min(2, Math.max(0.1, Math.round(v * 100) / 100));
+}
+// On the TV, the remote Back button drops the current phone pairing (the TV
+// then re-advertises a fresh code). Back when not paired keeps default exit.
+function tvBackAction(tvMode, paired) { return (tvMode && paired) ? "disconnect" : "default"; }
+if (typeof window !== "undefined") {
+  window.swipeAction = swipeAction;
+  window.stepSensitivity = stepSensitivity;
+  window.tvBackAction = tvBackAction;
+}
+
 // In-DOM numeric code entry. window.prompt cannot request a numeric keyboard
 // or reliably autofocus, so build a small modal whose input raises the digits
 // soft-keyboard on focus. Resolves to the 4-digit string, or null on cancel.
@@ -2075,6 +2095,13 @@ async function init() {
       //   4. No capture running (start screen) -> confirm-exit dialog.
       if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
         window.Capacitor.Plugins.App.addListener("backButton", () => {
+          // On the TV, the remote Back button drops the current phone pairing
+          // (the TV then re-advertises a fresh code). Takes priority over the
+          // overlay/drawer/exit ladder below.
+          if (window.tvBackAction(state.tvMode, state.paired) === "disconnect") {
+            window.Capacitor?.Plugins?.ScopeAudio?.tvDisconnectClient();
+            return;
+          }
           const overlay = document.getElementById("privacy-overlay");
           if (overlay && !overlay.classList.contains("hidden")) {
             if (typeof window.closePrivacyOverlay === "function") {
@@ -2252,5 +2279,5 @@ function formatVersionLabel(v) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { freqToX, findZeroCrossing, nextCaptureModeBadgeProps, spectrumPolylinePoints, captureSourceMicMode, pairOverlayLines, formatVersionLabel, fillResample, sanitizePairCode };
+  module.exports = { freqToX, findZeroCrossing, nextCaptureModeBadgeProps, spectrumPolylinePoints, captureSourceMicMode, pairOverlayLines, formatVersionLabel, fillResample, sanitizePairCode, swipeAction, stepSensitivity, tvBackAction };
 }

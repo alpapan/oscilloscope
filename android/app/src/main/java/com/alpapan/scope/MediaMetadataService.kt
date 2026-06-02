@@ -16,6 +16,9 @@ class MediaMetadataService : NotificationListenerService() {
         // Latest computed now-playing, cached so the plugin's getNowPlaying pull
         // can return the current track even when no change event is pending.
         @Volatile var latest: NowPlaying? = null
+        // The currently-chosen playing controller, exposed so the plugin can
+        // drive transport (skipToNext/Previous) without a new permission.
+        @Volatile var active: MediaController? = null
     }
 
     private val msm by lazy { getSystemService(MediaSessionManager::class.java) }
@@ -53,6 +56,7 @@ class MediaMetadataService : NotificationListenerService() {
         registered.clear()
         try { msm.removeOnActiveSessionsChangedListener(sessionsListener) } catch (_: Throwable) {}
         latest = null
+        active = null
     }
 
     /** Attach the metadata callback to the current controllers and retain them
@@ -82,6 +86,7 @@ class MediaMetadataService : NotificationListenerService() {
         val chosen = chosenInfo?.let { ci ->
             controllers.firstOrNull { it.packageName == ci.pkg && it.playbackState?.state == PlaybackState.STATE_PLAYING }
         }
+        active = chosen
         val md = chosen?.metadata
         val np = NowPlayingLogic.build(
             md?.getString(MediaMetadata.METADATA_KEY_TITLE),
