@@ -54,6 +54,19 @@ android {
     kotlinOptions {
         jvmTarget = '21'
     }
+    testOptions {
+        managedDevices {
+            localDevices {
+                api34google { device = "Pixel 6"; apiLevel = 34; systemImageSource = "google" }
+                api35google { device = "Pixel 6"; apiLevel = 35; systemImageSource = "google" }
+                api36play   { device = "Pixel 6"; apiLevel = 36; systemImageSource = "google_apis_playstore" }
+            }
+            groups {
+                scopeMatrix { targetDevices.addAll(localDevices.api34google, localDevices.api35google, localDevices.api36play) }
+            }
+        }
+        emulatorControl { enable = true }
+    }
 }
 
 repositories {
@@ -75,6 +88,9 @@ dependencies {
     testImplementation "org.json:json:20231013"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    androidTestImplementation "androidx.test:runner:$androidxTestRunnerVersion"
+    androidTestImplementation "androidx.test:core-ktx:$androidxTestCoreVersion"
+    androidTestImplementation "androidx.test.uiautomator:uiautomator:$androidxUiautomatorVersion"
     implementation project(':capacitor-cordova-android-plugins')
 }
 

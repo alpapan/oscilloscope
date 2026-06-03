@@ -4,7 +4,7 @@
 # wiring, and the tools/audit/tests/ directory are all set up correctly
 # before any contract-asserting test runs. Kept intentionally trivial -
 # do NOT add real assertions here; they belong in the per-script .bats
-# files (setup-android-cli.bats, etc.).
+# files (run-ftl.bats, etc.).
 @test "bats itself is alive" {
   result=$((2 + 2))
   [ "$result" -eq 4 ]
