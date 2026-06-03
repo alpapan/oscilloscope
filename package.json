@@ -5,9 +5,10 @@
   "description": "Scope music oscilloscope - Android + Electron + browser",
   "main": "electron/main.js",
   "scripts": {
-    "test": "node --test tests/*.test.js",
+    "test": "node --test tests/*.test.js tools/audit/journeys/*.test.mjs",
     "test:e2e": "playwright test",
     "test:audit": "bats tools/audit/tests",
+    "journeys": "node tools/audit/journeys/run.mjs",
     "serve": "http-server -p 8000 --cors -c-1",
     "electron": "electron .",
     "dist:win": "electron-builder --win nsis",
