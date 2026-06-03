@@ -198,9 +198,15 @@ class AudioCaptureService : Service() {
                 .addMatchingUsage(AudioAttributes.USAGE_GAME)
                 .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
                 .build()
-            record = buildProjectionRecord(config, format, bufferBytes)
-            try { record?.startRecording() } catch (e: Throwable) {
-                android.util.Log.e("ScopeAudio", "Real AudioRecord startRecording failed: ${e.message}")
+            // build() can throw "could not register audio policy" when a prior
+            // capture's policy (the warm-up record above, or a fast restart) has not
+            // finished deregistering. Catch it with startRecording so the reader
+            // thread exits gracefully instead of crashing the whole process.
+            try {
+                record = buildProjectionRecord(config, format, bufferBytes)
+                record?.startRecording()
+            } catch (e: Throwable) {
+                android.util.Log.e("ScopeAudio", "Real AudioRecord build/start failed: ${e.message}")
                 return@Thread
             }
 
