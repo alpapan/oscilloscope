@@ -3,10 +3,13 @@
 # matrix. Stays inside the Spark free-tier daily budget by capping --timeout
 # at 3m and limiting devices to 4.
 #
-# PREREQUISITE before first real run: edit the four `model=` placeholders below
-# (a35x, redmi13, salami, rmx3370) to the values chosen in
-# docs/audits/2026-06-audit/ftl-matrix/chosen-devices.md. Unedited placeholders
-# will fail `gcloud firebase test android run` against the live catalog.
+# Device matrix chosen from the plan's per-OEM fallback chains against the
+# live FTL catalog on 2026-06-04 - see
+# docs/audits/2026-06-audit/ftl-matrix/chosen-devices.md for the walk:
+#   - a35x,version=36       Samsung Galaxy A35 5G   (Android 16)
+#   - dm1q,version=35       Samsung Galaxy S23      (Android 15; 2nd Samsung at A15, substituted for absent Xiaomi)
+#   - CPH2449,version=34    OnePlus 11 5G           (Android 14)
+#   - RE58C2,version=35     realme C53              (Android 15)
 set -euo pipefail
 
 # Resolve repo root from this script's own location so relative paths work from
@@ -56,9 +59,9 @@ gcloud firebase test android run \
   --type robo \
   --app "$APK" \
   --device model=a35x,version=36,locale=en,orientation=portrait \
-  --device model=redmi13,version=35,locale=en,orientation=portrait \
-  --device model=salami,version=34,locale=en,orientation=portrait \
-  --device model=rmx3370,version=34,locale=en,orientation=portrait \
+  --device model=dm1q,version=35,locale=en,orientation=portrait \
+  --device model=CPH2449,version=34,locale=en,orientation=portrait \
+  --device model=RE58C2,version=35,locale=en,orientation=portrait \
   --robo-script "$SCRIPT" \
   --timeout 3m \
   --results-dir "$RESULTS_DIR" \
