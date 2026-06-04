@@ -1,0 +1,152 @@
+ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  User 0 active services:
+  * ServiceRecord{d1ec2fb u0 com.alpapan.scope/org.chromium.content.app.SandboxedProcessService0:0 c:com.alpapan.scope}
+    intent={cmp=com.alpapan.scope/org.chromium.content.app.SandboxedProcessService0:0}
+    packageName=com.alpapan.scope
+    processName=com.google.android.webview:sandboxed_process0:org.chromium.content.app.SandboxedProcessService0:0
+    targetSdkVersion=36
+    baseDir=/data/app/~~rQbVIKXA3Q0eQurkDM9BnQ==/com.google.android.webview-N-R9Ev9cT-1QH9LPxK8Uvw==/base.apk
+    dataDir=/data/user/0/com.google.android.webview
+    app=ProcessRecord{9835756 19051:com.google.android.webview:sandboxed_process0:org.chromium.content.app.SandboxedProcessService0:0/u0a392i29}
+    isolationHostProc=ProcessRecord{9835756 19051:com.google.android.webview:sandboxed_process0:org.chromium.content.app.SandboxedProcessService0:0/u0a392i29}
+    useNewWiuLogic_forCapabilities()=true
+    useNewWiuLogic_forStart()=true
+    useNewBfslLogic()=true
+    mAllowWiu_noBinding=DENIED
+    mAllowWiu_inBindService=PROC_STATE_TOP
+    mAllowWiu_byBindings=DENIED
+    getFgsAllowWiu_legacy=PROC_STATE_TOP
+    getFgsAllowWiu_new=DENIED
+    getFgsAllowWiu_forStart=DENIED
+    getFgsAllowWiu_forCapabilities=DENIED
+    allowUiJobScheduling=false
+    recentCallingPackage=com.alpapan.scope
+    recentCallingUid=10392
+    mAllowStart_noBinding=DENIED
+    mAllowStart_inBindService=PROC_STATE_TOP
+    mAllowStart_byBindings=DENIED
+    getFgsAllowStart_legacy=PROC_STATE_TOP
+    getFgsAllowStart_new=DENIED
+    getFgsAllowStart=DENIED
+    startForegroundCount=0
+    infoAllowStartForeground=[callingPackage: com.alpapan.scope; callingUid: 10392; uidState: TOP ; uidBFSL: [BFSL]; intent: Intent { xflg=0x4 cmp=com.alpapan.scope/org.chromium.content.app.SandboxedProcessService0:0 (has extras) }; code:PROC_STATE_TOP; tempAllowListReason:<null>; allowWiu:12; targetSdkVersion:36; callerTargetSdkVersion:36; startForegroundCount:0; bindFromPackage:null: isBindService:true]
+    createTime=-1m18s624ms startingBgTimeout=--
+    lastActivity=-1m18s436ms restartTime=-1m18s587ms createdFromFg=true
+    Bindings:
+    * IntentBindRecord{857ad5f CREATE}:
+      intent={xflg=0x4 cmp=com.alpapan.scope/org.chromium.content.app.SandboxedProcessService0:0}
+      binder=android.os.BinderProxy@aa1f3ac
+      requested=true received=true hasBound=true doRebind=false
+      * Client AppBindRecord{23b5875 ProcessRecord{efd8cd1 19004:com.alpapan.scope/u0a392}}
+        Per-process Connections:
+          ConnectionRecord{7592e2 u0 CR WPRI com.alpapan.scope/org.chromium.content.app.SandboxedProcessService0:0:@a020fad flags=0x80000021}
+          ConnectionRecord{bf8f769 u0 CR IMP com.alpapan.scope/org.chromium.content.app.SandboxedProcessService0:0:@9afa5f0 flags=0x80000041}
+    All Connections:
+      ConnectionRecord{bf8f769 u0 CR IMP com.alpapan.scope/org.chromium.content.app.SandboxedProcessService0:0:@9afa5f0 flags=0x80000041}
+      ConnectionRecord{7592e2 u0 CR WPRI com.alpapan.scope/org.chromium.content.app.SandboxedProcessService0:0:@a020fad flags=0x80000021}
+
+  * ServiceRecord{9365ddd u0 com.alpapan.scope/.AudioCaptureService c:com.alpapan.scope}
+    intent={cmp=com.alpapan.scope/.AudioCaptureService}
+    packageName=com.alpapan.scope
+    processName=com.alpapan.scope
+    targetSdkVersion=36
+    baseDir=/data/app/~~ASn94M6NznOhoehkQgOIkg==/com.alpapan.scope-AUkIUGbZA11peJMfvw-wFA==/base.apk
+    dataDir=/data/user/0/com.alpapan.scope
+    app=ProcessRecord{efd8cd1 19004:com.alpapan.scope/u0a392}
+    useNewWiuLogic_forCapabilities()=true
+    useNewWiuLogic_forStart()=true
+    useNewBfslLogic()=true
+    mAllowWiu_noBinding=PROC_STATE_TOP
+    mAllowWiu_inBindService=DENIED
+    mAllowWiu_byBindings=PROC_STATE_TOP
+    getFgsAllowWiu_legacy=PROC_STATE_TOP
+    getFgsAllowWiu_new=PROC_STATE_TOP
+    getFgsAllowWiu_forStart=PROC_STATE_TOP
+    getFgsAllowWiu_forCapabilities=PROC_STATE_TOP
+    allowUiJobScheduling=true
+    recentCallingPackage=com.alpapan.scope
+    recentCallingUid=10392
+    mAllowStart_noBinding=PROC_STATE_TOP
+    mAllowStart_inBindService=DENIED
+    mAllowStart_byBindings=PROC_STATE_TOP
+    getFgsAllowStart_legacy=PROC_STATE_TOP
+    getFgsAllowStart_new=PROC_STATE_TOP
+    getFgsAllowStart=PROC_STATE_TOP
+    startForegroundCount=1
+    infoAllowStartForeground=[callingPackage: com.alpapan.scope; callingUid: 10392; uidState: TOP ; uidBFSL: [BFSL]; intent: Intent { xflg=0x4 cmp=com.alpapan.scope/.AudioCaptureService (has extras) }; code:PROC_STATE_TOP; tempAllowListReason:<null>; allowWiu:12; targetSdkVersion:36; callerTargetSdkVersion:36; startForegroundCount:0; bindFromPackage:null: isBindService:false]
+    isForeground=true foregroundId=376990 types=0x00000020 foregroundNoti=Notification(channel=scope_audio_capture shortcut=null contentView=null vibrate=null sound=null defaults=0 flags=ONGOING_EVENT|FOREGROUND_SERVICE color=0x00000000 actions=1 vis=PRIVATE)
+    createTime=-3s731ms startingBgTimeout=--
+    lastActivity=-3s730ms restartTime=-3s730ms createdFromFg=true
+    startRequested=true delayedStop=false stopIfKilled=false callStart=true lastStartId=1
+ startCommandResult=1
+
+  * ServiceRecord{83f9b5b u0 com.alpapan.scope/.MediaMetadataService c:android}
+    intent={act=android.service.notification.NotificationListenerService cmp=com.alpapan.scope/.MediaMetadataService}
+    packageName=com.alpapan.scope
+    processName=com.alpapan.scope
+    targetSdkVersion=36
+    permission=android.permission.BIND_NOTIFICATION_LISTENER_SERVICE
+    baseDir=/data/app/~~ASn94M6NznOhoehkQgOIkg==/com.alpapan.scope-AUkIUGbZA11peJMfvw-wFA==/base.apk
+    dataDir=/data/user/0/com.alpapan.scope
+    app=ProcessRecord{efd8cd1 19004:com.alpapan.scope/u0a392}
+    allowlistManager=true
+    useNewWiuLogic_forCapabilities()=true
+    useNewWiuLogic_forStart()=true
+    useNewBfslLogic()=true
+    mAllowWiu_noBinding=DENIED
+    mAllowWiu_inBindService=PROC_STATE_PERSISTENT
+    mAllowWiu_byBindings=DENIED
+    getFgsAllowWiu_legacy=PROC_STATE_PERSISTENT
+    getFgsAllowWiu_new=DENIED
+    getFgsAllowWiu_forStart=DENIED
+    getFgsAllowWiu_forCapabilities=DENIED
+    allowUiJobScheduling=false
+    recentCallingPackage=android
+    recentCallingUid=1000
+    mAllowStart_noBinding=DENIED
+    mAllowStart_inBindService=PROC_STATE_PERSISTENT
+    mAllowStart_byBindings=DENIED
+    getFgsAllowStart_legacy=PROC_STATE_PERSISTENT
+    getFgsAllowStart_new=DENIED
+    getFgsAllowStart=DENIED
+    startForegroundCount=0
+    infoAllowStartForeground=[callingPackage: android; callingUid: 1000; uidState: PER ; uidBFSL: [BFSL]; intent: Intent { act=android.service.notification.NotificationListenerService cmp=com.alpapan.scope/.MediaMetadataService }; code:PROC_STATE_PERSISTENT; tempAllowListReason:<,reasonCode:SYSTEM_ALLOW_LISTED,duration:9223372036854775807,callingUid:-1>; allowWiu:10; targetSdkVersion:36; callerTargetSdkVersion:36; startForegroundCount:0; bindFromPackage:null: isBindService:true]
+    createTime=-1m20s757ms startingBgTimeout=--
+    lastActivity=-1m20s633ms restartTime=-1m20s633ms createdFromFg=true
+    Bindings:
+    * IntentBindRecord{7b6800a CREATE}:
+      intent={act=android.service.notification.NotificationListenerService cmp=com.alpapan.scope/.MediaMetadataService}
+      binder=android.os.BinderProxy@573c07b
+      requested=true received=true hasBound=true doRebind=false
+      * Client AppBindRecord{1109e98 ProcessRecord{9c3b69f 1715:system/1000}}
+        Per-process Connections:
+          ConnectionRecord{83ee8c5 u0 CR FGS !PRCP S!CPU com.alpapan.scope/.MediaMetadataService:@953533c flags=0x805000101}
+          ConnectionRecord{fef7a6a u0 CR FGS !PRCP S!CPU com.alpapan.scope/.MediaMetadataService:@dec4055 flags=0x805000101}
+    All Connections:
+      ConnectionRecord{83ee8c5 u0 CR FGS !PRCP S!CPU com.alpapan.scope/.MediaMetadataService:@953533c flags=0x805000101}
+      ConnectionRecord{fef7a6a u0 CR FGS !PRCP S!CPU com.alpapan.scope/.MediaMetadataService:@dec4055 flags=0x805000101}
+
+  Connection bindings to services:
+  * ConnectionRecord{83ee8c5 u0 CR FGS !PRCP S!CPU com.alpapan.scope/.MediaMetadataService:@953533c flags=0x805000101}
+    binding=AppBindRecord{1109e98 com.alpapan.scope/.MediaMetadataService:system}
+    conn=android.app.LoadedApk$ServiceDispatcher$InnerConnection@953533c flags=0x805000101
+    ongoingCalls=false
+    BinderSession: CR{83ee8c5 1715->com.alpapan.scope/.MediaMetadataService flags=0x805000101}
+      Connection present: Yes
+      Ongoing binder calls: 0
+  * ConnectionRecord{bf8f769 u0 CR IMP com.alpapan.scope/org.chromium.content.app.SandboxedProcessService0:0:@9afa5f0 flags=0x80000041}
+    binding=AppBindRecord{23b5875 com.alpapan.scope/org.chromium.content.app.SandboxedProcessService0:0:com.alpapan.scope}
+    conn=android.os.BinderProxy@9afa5f0 flags=0x80000041
+    ongoingCalls=false
+  * ConnectionRecord{7592e2 u0 CR WPRI com.alpapan.scope/org.chromium.content.app.SandboxedProcessService0:0:@a020fad flags=0x80000021}
+    binding=AppBindRecord{23b5875 com.alpapan.scope/org.chromium.content.app.SandboxedProcessService0:0:com.alpapan.scope}
+    conn=android.os.BinderProxy@a020fad flags=0x80000021
+    ongoingCalls=false
+  * ConnectionRecord{fef7a6a u0 CR FGS !PRCP S!CPU com.alpapan.scope/.MediaMetadataService:@dec4055 flags=0x805000101}
+    binding=AppBindRecord{1109e98 com.alpapan.scope/.MediaMetadataService:system}
+    conn=android.app.LoadedApk$ServiceDispatcher$InnerConnection@dec4055 flags=0x805000101
+    ongoingCalls=true
+    BinderSession: CR{fef7a6a 1715->com.alpapan.scope/.MediaMetadataService flags=0x805000101}
+      Connection present: Yes
+      Ongoing binder calls: 1
+        onListenerConnected=1 

@@ -9,20 +9,18 @@ class KeyExchangeTest {
         val tv = KeyExchange.generateKeyPair()
         val pPub = KeyExchange.publicBytes(phone)
         val tPub = KeyExchange.publicBytes(tv)
-        val kPhone = KeyExchange.deriveKey(phone.private, tPub, pPub, tPub, "123456")
-        val kTv = KeyExchange.deriveKey(tv.private, pPub, pPub, tPub, "123456")
+        val kPhone = KeyExchange.deriveKey(phone.priv, tPub, pPub, tPub, "123456")
+        val kTv = KeyExchange.deriveKey(tv.priv, pPub, pPub, tPub, "123456")
         assertArrayEquals(kPhone, kTv)
         org.junit.Assert.assertEquals(32, kPhone.size)
-        // Reviewer Unverified-1: do NOT assume the public encoding is 32 bytes
-        // (X25519 .encoded is X.509 SubjectPublicKeyInfo, ~44 bytes). Only the
-        // DERIVED key is fixed at 32. Assert the pubkey is non-empty + round-trips.
-        org.junit.Assert.assertTrue(pPub.isNotEmpty() && tPub.isNotEmpty())
+        org.junit.Assert.assertEquals(32, pPub.size)
+        org.junit.Assert.assertEquals(32, tPub.size)
     }
     @Test fun differentCodeYieldsDifferentKey() {
         val phone = KeyExchange.generateKeyPair(); val tv = KeyExchange.generateKeyPair()
         val pPub = KeyExchange.publicBytes(phone); val tPub = KeyExchange.publicBytes(tv)
-        val a = KeyExchange.deriveKey(phone.private, tPub, pPub, tPub, "123456")
-        val b = KeyExchange.deriveKey(tv.private, pPub, pPub, tPub, "654321")
+        val a = KeyExchange.deriveKey(phone.priv, tPub, pPub, tPub, "123456")
+        val b = KeyExchange.deriveKey(tv.priv, pPub, pPub, tPub, "654321")
         assertFalse(a.contentEquals(b))
     }
     @Test fun hkdfMatchesRfc5869BasicVector() {

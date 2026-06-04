@@ -27,7 +27,7 @@ object Handshake {
         val tv = KeyExchange.generateKeyPair(); val tvPub = KeyExchange.publicBytes(tv)
         writeFrame(output, byteArrayOf(0) + JSONObject().put("type", "hello-ack").put("v", 2)
             .put("pub", Base64.getEncoder().encodeToString(tvPub)).toString().toByteArray())
-        val key = try { KeyExchange.deriveKey(tv.private, phonePub, phonePub, tvPub, session.code) } catch (_: Throwable) { return fail(limiter, session) }
+        val key = try { KeyExchange.deriveKey(tv.priv, phonePub, phonePub, tvPub, session.code) } catch (_: Throwable) { return fail(limiter, session) }
         val chan = SecureChannel(key, sendDir = 1, recvDir = 0)
         val confirmFrame = reader.next() ?: return fail(limiter, session)   // still capped at HANDSHAKE_MAX (confirm is tiny)
         val ok = try { chan.open(confirmFrame).contentEquals(CONFIRM) } catch (_: Throwable) { false }
@@ -52,7 +52,7 @@ object Handshake {
         val ackObj = try { JSONObject(String(ack.copyOfRange(1, ack.size), Charsets.UTF_8)) } catch (_: Throwable) { return null }
         if (ackObj.optInt("v") != 2) return null
         val tvPub = try { Base64.getDecoder().decode(ackObj.optString("pub")) } catch (_: Throwable) { return null }
-        val key = try { KeyExchange.deriveKey(phone.private, tvPub, phonePub, tvPub, code) } catch (_: Throwable) { return null }
+        val key = try { KeyExchange.deriveKey(phone.priv, tvPub, phonePub, tvPub, code) } catch (_: Throwable) { return null }
         val chan = SecureChannel(key, sendDir = 0, recvDir = 1)
         writeFrame(output, chan.seal(CONFIRM))
         val ackFrame = reader.next() ?: return null
