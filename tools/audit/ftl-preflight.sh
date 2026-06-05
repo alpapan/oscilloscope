@@ -17,6 +17,45 @@ RUN_FTL="${SCOPE_FTL_RUN_FTL:-$SCRIPT_DIR/run-ftl.sh}"
 fail=0
 say() { printf '[%s] %s: %s\n' "$1" "$2" "$3"; }
 
+# --report mode: query gcloud for cap and Cloud Monitoring for usage, print quota summary, exit early.
+if [[ "${1:-}" == "--report" ]]; then
+  # Get Spark physical daily cap; fall back to 5 if not a positive integer.
+  cap="$(gcloud alpha services quota list --service=testing.googleapis.com --consumer="projects/${PROJECT}" --filter='metric:testing.googleapis.com/spark_physical_tests' --format='value(consumerQuotaLimits[0].quotaBuckets[0].effectiveLimit)' 2>/dev/null || true)"
+  [[ "$cap" =~ ^[0-9]+$ ]] && [[ "$cap" -gt 0 ]] || cap=5
+
+  # Query Cloud Monitoring for net_usage DELTA points since today's quota-day reset (midnight Pacific).
+  pday="$(TZ=America/Los_Angeles date +%Y-%m-%d)"
+  start="$(date -u -d "TZ=\"America/Los_Angeles\" ${pday} 00:00:00" +%Y-%m-%dT%H:%M:%SZ)"
+  end="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  token="$(gcloud auth print-access-token 2>/dev/null || true)"
+  # `used` stays empty (=> degraded branch) if EITHER signal fails: curl -sf
+  # makes an HTTP 4xx/5xx (auth/permission) a non-zero exit rather than a 200
+  # error-body that jq would silently reduce to 0; and jq failing to parse a
+  # malformed 200 body leaves `used` empty too. A real 0-usage day returns a
+  # parseable body and yields used=0, which is NOT degraded.
+  used=""
+  if raw="$(curl -sf -G "https://monitoring.googleapis.com/v3/projects/${PROJECT}/timeSeries" \
+      --data-urlencode 'filter=metric.type="serviceruntime.googleapis.com/quota/rate/net_usage" AND metric.labels.quota_metric="testing.googleapis.com/spark_physical_tests"' \
+      --data-urlencode "interval.startTime=${start}" \
+      --data-urlencode "interval.endTime=${end}" \
+      -H "Authorization: Bearer ${token}" 2>/dev/null)"; then
+    used="$(printf '%s' "$raw" | jq '[.timeSeries[]?.points[]?.value.int64Value | tonumber] | add // 0' 2>/dev/null || true)"
+  fi
+
+  if [[ "$used" =~ ^[0-9]+$ ]]; then
+    remaining=$(( cap - used ))
+    (( remaining < 0 )) && remaining=0
+    printf '[REPORT] quota: used %d/%d Spark physical FTL slots today (resets midnight Pacific); %d remaining\n' "$used" "$cap" "$remaining"
+    exit 0
+  fi
+
+  # Usage genuinely unknown: do NOT print a remaining count that an operator
+  # might trust to spend a slot. Surface the failure and exit non-zero.
+  printf '[REPORT] quota: UNVERIFIED - Cloud Monitoring usage query failed (auth/network/API); Spark physical cap is %d/day, used-today unknown\n' "$cap"
+  printf 'ftl-preflight: could not read Spark physical usage from Cloud Monitoring; do not assume the full cap is free.\n' >&2
+  exit 2
+fi
+
 # 1. Billing must be OFF (Spark eligibility).
 billing="$(gcloud beta billing projects describe "$PROJECT" 2>/dev/null || true)"
 if printf '%s' "$billing" | grep -qiE 'billingEnabled:[[:space:]]*true'; then

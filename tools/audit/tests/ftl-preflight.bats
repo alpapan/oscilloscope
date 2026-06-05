@@ -41,10 +41,33 @@ case "$*" in
     done
     exit 0
     ;;
+  *"services quota list"*)
+    # Spark physical-test daily cap. The script asks with --format='value(...)'
+    # so a bare number is the contract here.
+    echo "${FAKE_SPARK_CAP:-5}"
+    exit 0
+    ;;
 esac
 exit 0
 EOF
   chmod +x "${BATS_TEST_TMPDIR}/gcloud"
+
+  # Fake curl for the Cloud Monitoring timeSeries usage query. Ignores its args
+  # and emits a canned net_usage payload; the DELTA point values come from
+  # FAKE_NET_USAGE (space-separated ints; empty string = no runs today).
+  export CURL_LOG="${BATS_TEST_TMPDIR}/curl.log"
+  cat > "${BATS_TEST_TMPDIR}/curl" <<'EOF'
+#!/usr/bin/env bash
+printf 'curl %s\n' "$*" >> "${CURL_LOG:-/dev/null}"
+# Simulate a failed Monitoring query (auth/network/HTTP error) when asked.
+if [[ -n "${FAKE_CURL_FAIL:-}" ]]; then exit 22; fi
+pts=""
+for v in ${FAKE_NET_USAGE:-}; do
+  pts="${pts}{\"value\":{\"int64Value\":\"${v}\"}},"
+done
+printf '{"timeSeries":[{"points":[%s]}]}\n' "${pts%,}"
+EOF
+  chmod +x "${BATS_TEST_TMPDIR}/curl"
 }
 
 @test "exits 0 on the happy path (billing off, all 4 models, 0 runs today)" {
@@ -149,4 +172,56 @@ EOF
   printf '%s\n' "$output" | grep -qE "^\[(PASS|FAIL)\] billing"
   printf '%s\n' "$output" | grep -qE "^\[(PASS|FAIL)\] models"
   printf '%s\n' "$output" | grep -qE "^\[(PASS|FAIL)\] quota"
+}
+
+# --- --report mode: authoritative quota report from gcloud + Monitoring -------
+# Reports remaining Spark physical-device FTL slots for the current quota day
+# (cap from `gcloud alpha services quota list`, used-today from Cloud Monitoring
+# net_usage). Read-only; makes no submit and runs none of the pre-run gates.
+
+@test "--report prints used/cap/remaining (net_usage 1+4 = 5/5, 0 left)" {
+  run env FAKE_NET_USAGE="1 4" FAKE_SPARK_CAP=5 "${REPO_ROOT}/tools/audit/ftl-preflight.sh" --report
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qE "^\[REPORT\] quota:"
+  printf '%s\n' "$output" | grep -qE "used 5/5"
+  printf '%s\n' "$output" | grep -qE "0 remaining"
+}
+
+@test "--report sums monitoring net_usage for used-today (2 used -> 3 left)" {
+  run env FAKE_NET_USAGE="2" FAKE_SPARK_CAP=5 "${REPO_ROOT}/tools/audit/ftl-preflight.sh" --report
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qE "used 2/5"
+  printf '%s\n' "$output" | grep -qE "3 remaining"
+}
+
+@test "--report with no runs today shows the full cap remaining" {
+  run env FAKE_NET_USAGE="" FAKE_SPARK_CAP=5 "${REPO_ROOT}/tools/audit/ftl-preflight.sh" --report
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qE "used 0/5"
+  printf '%s\n' "$output" | grep -qE "5 remaining"
+}
+
+@test "--report skips the billing and catalog network gates, queries Monitoring" {
+  run env FAKE_NET_USAGE="" "${REPO_ROOT}/tools/audit/ftl-preflight.sh" --report
+  [ "$status" -eq 0 ]
+  ! grep -q "billing projects describe" "${GCLOUD_LOG}"
+  ! grep -q "models list" "${GCLOUD_LOG}"
+  # Positive: the ONE gcloud call report mode makes is the quota lookup.
+  grep -q "services quota list" "${GCLOUD_LOG}"
+  [ -s "${BATS_TEST_TMPDIR}/curl.log" ]
+}
+
+@test "--report falls back to the documented cap of 5 when the cap query is empty" {
+  run env FAKE_SPARK_CAP="" FAKE_NET_USAGE="" "${REPO_ROOT}/tools/audit/ftl-preflight.sh" --report
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qE "used 0/5"
+  printf '%s\n' "$output" | grep -qE "5 remaining"
+}
+
+@test "--report signals UNVERIFIED and exits non-zero when the Monitoring query fails" {
+  run env FAKE_CURL_FAIL=1 "${REPO_ROOT}/tools/audit/ftl-preflight.sh" --report
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qE "UNVERIFIED"
+  # Must NOT fabricate a remaining count when usage is genuinely unknown.
+  ! printf '%s\n' "$output" | grep -qE "[0-9]+ remaining"
 }
