@@ -192,16 +192,23 @@ log "capture pipeline live (AudioCaptureService running)"
 # 6. close drawer if open (BACK), then cycle view to Waveform.
 # Synthesized double-tap in a single adb shell (avoids per-call shell startup
 # that would push the second tap outside the 300ms double-tap window in mobile-ui.js).
+# Tap the screen CENTRE derived from `wm size`, never a hardcoded point: the
+# now-playing card is pointer-events:none so a centre tap reaches the canvas, and
+# a fixed coord (old 1280x300, a tangorpro-tablet point) is off-screen on a
+# portrait phone (frankel is 1080 wide), so the double-tap never landed.
 # The wait_for_view_text poll below is the gate: if the chained tap silently
 # delivered only one tap, the view stays on "Now Playing", the poll times out,
-# and the retry fires. Worst-case state-leak from a delayed second tap is a
-# palette cycle (single-tap behaviour); the next chained pair re-arrives in the
-# double-tap window and the view-switch proceeds.
+# and the retry fires.
+# Command-substitution (not read < <(...)) so a parse failure in the helper
+# actually propagates to `|| die` - process substitution would hide its exit.
+TAP_CENTER="$(screen_center_from_wm_size "$(adb_shell 'wm size')")" \
+  || die "could not parse screen size from 'wm size' for the view-cycle tap"
+read -r TAPX TAPY <<< "$TAP_CENTER"
 adb_shell "input keyevent 4" >/dev/null 2>&1
 sleep 1
-adb_shell "input tap 1280 300;input tap 1280 300" >/dev/null 2>&1
+adb_shell "input tap $TAPX $TAPY;input tap $TAPX $TAPY" >/dev/null 2>&1
 if ! wait_for_view_text "Waveform" 10; then
-  adb_shell "input tap 1280 300;input tap 1280 300" >/dev/null 2>&1
+  adb_shell "input tap $TAPX $TAPY;input tap $TAPX $TAPY" >/dev/null 2>&1
   wait_for_view_text "Waveform" 10 \
     || die "view did not cycle to Waveform after double-tap"
 fi

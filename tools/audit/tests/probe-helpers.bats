@@ -221,3 +221,31 @@ setup() {
   [[ "$output" == FAIL* ]]
   [[ "$output" == *"play_diffs empty"* ]]
 }
+
+# screen_center_from_wm_size <wm-size-output> -> "<cx> <cy>"
+# The view-cycle double-tap must land on the canvas regardless of device. The
+# old probe hardcoded 1280 300 (a tangorpro-tablet coord) which is off-screen on
+# a 1080-wide portrait phone (frankel), so the tap never registered.
+
+@test "screen_center_from_wm_size centers a portrait phone (frankel 1080x2424)" {
+  run screen_center_from_wm_size "Physical size: 1080x2424"
+  [ "$status" -eq 0 ]
+  [ "$output" = "540 1212" ]
+}
+
+@test "screen_center_from_wm_size centers the tangorpro tablet (1600x2560)" {
+  run screen_center_from_wm_size "Physical size: 1600x2560"
+  [ "$status" -eq 0 ]
+  [ "$output" = "800 1280" ]
+}
+
+@test "screen_center_from_wm_size prefers an Override size over Physical size" {
+  run screen_center_from_wm_size "$(printf 'Physical size: 1080x2424\nOverride size: 720x1612')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "360 806" ]
+}
+
+@test "screen_center_from_wm_size exits non-zero when no resolution parses" {
+  run screen_center_from_wm_size "wm: inaccessible or not found"
+  [ "$status" -ne 0 ]
+}

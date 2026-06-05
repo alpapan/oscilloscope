@@ -102,6 +102,22 @@ find_serial_for_ip() {
   echo "${line%%[[:space:]]*}"
 }
 
+# screen_center_from_wm_size <wm-size-output>
+# Echoes "<cx> <cy>", the centre of the effective display reported by
+# `adb shell wm size`. Prefers an "Override size:" line (what `input tap` honours
+# when a size override is set) over "Physical size:". Exits non-zero if no WxH
+# parses. Pure: the caller captures `wm size` and passes it in. Replaces the old
+# hardcoded 1280x300 view-cycle tap, which was off-screen on portrait phones.
+screen_center_from_wm_size() {
+  local out="$1" size w h
+  size=$(printf '%s\n' "$out" | grep -E 'Override size:' | grep -oE '[0-9]+x[0-9]+')
+  [[ -z "$size" ]] && size=$(printf '%s\n' "$out" | grep -E 'Physical size:' | grep -oE '[0-9]+x[0-9]+')
+  [[ -z "$size" ]] && return 1
+  w=${size%x*}; h=${size#*x}
+  [[ "$w" =~ ^[0-9]+$ && "$h" =~ ^[0-9]+$ ]] || return 1
+  echo "$(( w / 2 )) $(( h / 2 ))"
+}
+
 # _median INT...
 # Echoes the integer median of the args.
 # Odd-length: middle value. Even-length: integer mean of the two middle values.
