@@ -71,3 +71,11 @@ EOF
   run "${REPO_ROOT}/tools/audit/run-ftl.sh"
   find "${SCOPE_FTL_RESULTS_BASE}" -mindepth 1 -maxdepth 1 -type d | grep -q .
 }
+
+@test "records the submitted device count in <run-dir>/.slot-count (for the quota model)" {
+  run "${REPO_ROOT}/tools/audit/run-ftl.sh"
+  [ "$status" -eq 0 ]
+  d="$(find "${SCOPE_FTL_RESULTS_BASE}" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+  [ -f "$d/.slot-count" ]
+  [ "$(< "$d/.slot-count")" -eq 4 ]
+}

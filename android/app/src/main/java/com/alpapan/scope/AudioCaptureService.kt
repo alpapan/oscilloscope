@@ -259,13 +259,22 @@ class AudioCaptureService : Service() {
                                 try { record?.release() } catch (_: Throwable) {}
                                 // Fresh config each retry; reusing the same
                                 // instance has not empirically triggered a
-                                // re-patch on Android 14+.
-                                val freshConfig = AudioPlaybackCaptureConfiguration.Builder(proj)
-                                    .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-                                    .addMatchingUsage(AudioAttributes.USAGE_GAME)
-                                    .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-                                    .build()
-                                record = buildProjectionRecord(freshConfig, format, bufferBytes)
+                                // re-patch on Android 14+. Building the config
+                                // and the AudioRecord can throw on some OEMs; a
+                                // throw here must not kill the reader thread, so
+                                // it is guarded like the stop/release/start calls
+                                // around it. On failure record stays null and the
+                                // next record?.read returns -1 (loop continues).
+                                record = try {
+                                    val freshConfig = AudioPlaybackCaptureConfiguration.Builder(proj)
+                                        .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                                        .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                                        .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                                        .build()
+                                    buildProjectionRecord(freshConfig, format, bufferBytes)
+                                } catch (_: Throwable) {
+                                    null
+                                }
                                 try { record?.startRecording() } catch (_: Throwable) {}
                                 lastNonZeroIdx = chunkIdx
                             }

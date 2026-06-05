@@ -53,23 +53,35 @@ else
   fi
 fi
 
-# 3. Today's UTC quota. A run-ftl.sh submit consumes 4 of the 5 daily physical
-# slots, so the safe contract is: don't submit a second time today. Count
-# subdirs of RESULTS_BASE whose name starts with today's UTC date. Re-resolve
-# `today` here (not at script start) so a midnight roll-over during the run
-# does not race the check.
+# 3. Today's UTC quota, counted in Spark device-slots rather than result dirs.
+# A 4-device matrix consumes 4 of the 5 daily slots from a single dir; a
+# 1-device dry-run consumes 1. run-ftl.sh records the slots it consumed in
+# <run-dir>/.slot-count; a today-dir without that file is counted as 1 slot (at
+# least one device was submitted). The next run's slot need is the count of
+# `--device model=` entries in run-ftl.sh (same source of truth as the model
+# check above). FAIL only if used + next would exceed the daily cap, so the
+# dry-run-then-full pattern is not blocked. Re-resolve `today` here (not at
+# script start) so a midnight roll-over during the run does not race the check.
+DAILY_CAP="${SCOPE_FTL_DAILY_CAP:-5}"
+next_slots=$(grep -cE 'model=[a-zA-Z0-9]+' "$RUN_FTL" 2>/dev/null || true)
+[[ "$next_slots" =~ ^[0-9]+$ ]] || next_slots=0
 today="$(date -u +%Y%m%d)"
-todays_runs=0
+used_slots=0
 if [[ -d "$RESULTS_BASE" ]]; then
-  while IFS= read -r _; do todays_runs=$((todays_runs + 1)); done < <(
-    find "$RESULTS_BASE" -mindepth 1 -maxdepth 1 -type d -name "${today}T*" 2>/dev/null
-  )
+  while IFS= read -r d; do
+    n=1
+    if [[ -f "$d/.slot-count" ]]; then
+      read -r n < "$d/.slot-count" || n=1
+      [[ "$n" =~ ^[0-9]+$ ]] || n=1
+    fi
+    used_slots=$((used_slots + n))
+  done < <(find "$RESULTS_BASE" -mindepth 1 -maxdepth 1 -type d -name "${today}T*" 2>/dev/null)
 fi
-if [[ "$todays_runs" -ge 1 ]]; then
-  say FAIL quota "$todays_runs FTL run(s) already today under $RESULTS_BASE; a second would risk the 5/day Spark cap"
+if (( used_slots + next_slots > DAILY_CAP )); then
+  say FAIL quota "today uses ${used_slots} slot(s); next run needs ${next_slots}; ${used_slots}+${next_slots} exceeds ${DAILY_CAP}/day Spark cap under $RESULTS_BASE"
   fail=1
 else
-  say PASS quota "0 FTL runs today under $RESULTS_BASE"
+  say PASS quota "${used_slots}/${DAILY_CAP} slots used today; next run (${next_slots}) fits under $RESULTS_BASE"
 fi
 
 exit "$fail"

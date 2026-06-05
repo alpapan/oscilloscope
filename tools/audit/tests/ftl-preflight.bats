@@ -82,6 +82,36 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "a 1-slot dry-run today still leaves room for the 4-slot full run (PASS)" {
+  # The dry-run-then-full pattern: a 1-device dry-run consumed 1 of the 5 daily
+  # slots. The 4-device full run needs 4 more; 1 + 4 = 5 fits. The old dir-count
+  # gate FAILed here because it saw "1 run today".
+  today="$(date -u +%Y%m%d)"
+  mkdir -p "${SCOPE_FTL_RESULTS_BASE}/${today}T010000Z"
+  echo 1 > "${SCOPE_FTL_RESULTS_BASE}/${today}T010000Z/.slot-count"
+  run "${REPO_ROOT}/tools/audit/ftl-preflight.sh"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qE "^\[PASS\] quota"
+}
+
+@test "a today dir without a slot-count manifest counts as 1 slot, full run still permitted" {
+  today="$(date -u +%Y%m%d)"
+  mkdir -p "${SCOPE_FTL_RESULTS_BASE}/${today}T020000Z"
+  run "${REPO_ROOT}/tools/audit/ftl-preflight.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "blocks the full run once today's used slots leave fewer than 4 free" {
+  # 2 slots already used today; the 4-device full run would push 2 + 4 = 6 over
+  # the 5/day Spark cap.
+  today="$(date -u +%Y%m%d)"
+  mkdir -p "${SCOPE_FTL_RESULTS_BASE}/${today}T030000Z"
+  echo 2 > "${SCOPE_FTL_RESULTS_BASE}/${today}T030000Z/.slot-count"
+  run "${REPO_ROOT}/tools/audit/ftl-preflight.sh"
+  [ "$status" -ne 0 ]
+  printf '%s\n' "$output" | grep -qiE "quota|slot"
+}
+
 @test "queries gcloud for every model listed in run-ftl.sh (one source of truth)" {
   run "${REPO_ROOT}/tools/audit/ftl-preflight.sh"
   [ "$status" -eq 0 ]

@@ -46,13 +46,21 @@ capture_service_running() {
 
 # verdict_from_diffs <play_diffs> <pause_diffs> <resume_diffs>
 # Each arg is a space-separated list of integers (px-AE counts).
-# PASS criteria:
-#   median(PLAY)   >= 50000   (audio drives motion)
-#   median(RESUME) >= 50000   (resume restores motion)
-#   median(PAUSE)  <=  5000   (pause freezes the trace)
+# The PLAY/RESUME motion floor depends on $LAYOUT (default tablet); the TV
+# renders the same geometry at a smaller on-screen scale, so it moves fewer
+# pixels per frame and gets a lower floor. The PAUSE freeze ceiling is the same
+# for both. An unrecognised LAYOUT falls back to the strict tablet floor so a
+# typo cannot silently relax the threshold.
+#   LAYOUT=tablet (default):  median(PLAY|RESUME) >= 50000
+#   LAYOUT=tv:                median(PLAY|RESUME) >= 20000
+#   both:                     median(PAUSE)       <=  5000
 # Echoes "PASS ..." or "FAIL: ..." and exits 0 or 1.
 verdict_from_diffs() {
   local play="$1" pause="$2" resume="$3"
+  local motion_floor=50000
+  case "${LAYOUT:-tablet}" in
+    tv) motion_floor=20000 ;;
+  esac
   # Strip ALL whitespace (spaces, tabs, newlines, carriage returns) before
   # checking. A quoted whitespace-only argument is treated as empty input
   # and reported with a clear FAIL reason.
@@ -73,8 +81,8 @@ verdict_from_diffs() {
   # shellcheck disable=SC2086
   mr=$(_median $resume)
   local fail=
-  (( mp < 50000 )) && fail="${fail}play_median=${mp}<50000 "
-  (( mr < 50000 )) && fail="${fail}resume_median=${mr}<50000 "
+  (( mp < motion_floor )) && fail="${fail}play_median=${mp}<${motion_floor} "
+  (( mr < motion_floor )) && fail="${fail}resume_median=${mr}<${motion_floor} "
   (( mq > 5000  )) && fail="${fail}pause_median=${mq}>5000 "
   if [[ -n "$fail" ]]; then
     echo "FAIL: ${fail% }"

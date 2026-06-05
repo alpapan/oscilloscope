@@ -104,7 +104,7 @@
       state.sensitivity = window.stepSensitivity(state.sensitivity, action === "sens-up" ? +1 : -1);
       applyState();
       refreshDrawer(state);
-      showToast("Sensitivity " + state.sensitivity.toFixed(2));
+      showToast("Gain " + state.sensitivity.toFixed(2));
     }
   }
 

@@ -103,6 +103,51 @@ setup() {
   [[ "$output" == FAIL* ]]
 }
 
+@test "verdict_from_diffs LAYOUT=tv PASSes on PLAY/RESUME medians in [20000,50000)" {
+  # TV renders the same geometry at a smaller on-screen scale, so its per-frame
+  # AE counts run lower. 30000 motion FAILs the tablet floor but PASSes on TV.
+  export LAYOUT=tv
+  run verdict_from_diffs "30000 30000 30000" "0 0 0" "30000 30000 30000"
+  [ "$status" -eq 0 ]
+  [[ "$output" == PASS* ]]
+}
+
+@test "verdict_from_diffs default (tablet) FAILs the same 30000 medians (floor is 50000)" {
+  run verdict_from_diffs "30000 30000 30000" "0 0 0" "30000 30000 30000"
+  [ "$status" -ne 0 ]
+  [[ "$output" == FAIL* ]]
+}
+
+@test "verdict_from_diffs LAYOUT=tablet (explicit) uses the 50000 floor (FAILs at 30000)" {
+  export LAYOUT=tablet
+  run verdict_from_diffs "30000 30000 30000" "0 0 0" "30000 30000 30000"
+  [ "$status" -ne 0 ]
+  [[ "$output" == FAIL* ]]
+}
+
+@test "verdict_from_diffs LAYOUT=tv FAILs when PLAY median is below the 20000 TV floor" {
+  export LAYOUT=tv
+  run verdict_from_diffs "10000 10000 10000" "0 0 0" "30000 30000 30000"
+  [ "$status" -ne 0 ]
+  [[ "$output" == FAIL* ]]
+}
+
+@test "verdict_from_diffs LAYOUT=tv still FAILs when PAUSE does not freeze (>5000)" {
+  # The PAUSE freeze threshold is layout-independent: a TV that keeps moving
+  # while paused is still a fail.
+  export LAYOUT=tv
+  run verdict_from_diffs "30000 30000 30000" "6000 6000 6000" "30000 30000 30000"
+  [ "$status" -ne 0 ]
+  [[ "$output" == FAIL* ]]
+}
+
+@test "verdict_from_diffs treats an unknown LAYOUT as the strict tablet floor" {
+  export LAYOUT=bogus
+  run verdict_from_diffs "30000 30000 30000" "0 0 0" "30000 30000 30000"
+  [ "$status" -ne 0 ]
+  [[ "$output" == FAIL* ]]
+}
+
 @test "find_serial_for_ip returns the connected serial when adb already knows the device" {
   local devices_output='List of devices attached
 192.168.0.182:40391    device product:tangorpro model:Pixel_Tablet device:tangorpro
