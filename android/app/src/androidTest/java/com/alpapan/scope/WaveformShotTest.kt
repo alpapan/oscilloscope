@@ -65,6 +65,6 @@ class WaveformShotTest {
 
         // Let the tone-driven trace animate a few frames, then capture.
         Thread.sleep(2500)
-        JourneySupport.shot("waveform")
+        check(JourneySupport.proveScopeState(s, "waveform", "(document.getElementById('mobile-view')||{}).value === 'waveform'") is ShotResult.Success)
     }
 }

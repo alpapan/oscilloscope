@@ -26,6 +26,6 @@ class StartCaptureMicTest {
         val deadline = System.currentTimeMillis() + 8000
         while (System.currentTimeMillis() < deadline && !JourneySupport.isForegroundService(".AudioCaptureService")) Thread.sleep(250)
         check(JourneySupport.isForegroundService(".AudioCaptureService")) { "AudioCaptureService is not running in the foreground" }
-        JourneySupport.shot("01-mic-canvas")
+        check(JourneySupport.proveScopeState(s, "01-mic-canvas", "document.getElementById('mobile-start').hidden === true") is ShotResult.Success)
     }
 }

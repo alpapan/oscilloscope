@@ -29,6 +29,6 @@ class TvPairDiscoveryTest {
         // open the pairing surface; mDNS discovery shows "Searching" then offers manual IP entry
         JourneySupport.clickId(s, "mobile-connect-tv")
         JourneySupport.assertJs(s, "/Enter IP manually|Searching/i.test(document.body.innerText)")
-        JourneySupport.shot("01-pair-surface")
+        check(JourneySupport.proveScopeState(s, "01-pair-surface", "/Enter IP manually|Searching/i.test(document.body.innerText)") is ShotResult.Success)
     }
 }
