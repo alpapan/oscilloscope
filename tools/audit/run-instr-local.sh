@@ -77,14 +77,51 @@ install_apk "$TEST_APK" "${PKG}.test"  || { echo "ERROR: androidTest APK did not
 ensure_connected
 "$ADB" -s "$SERIAL" shell input keyevent KEYCODE_HOME || true
 
-# Single instrumentation pass (no retries). am instrument exits 0 even when tests fail, so the
+# Wake + hold the screen on for the whole run. A headless run can find the device asleep or on the
+# lockscreen, and ActivityScenario.launch only reaches RESUMED on a lit, unlocked screen - a dark
+# screen leaves the activity in CREATED, so the RECORD_AUDIO dialog never shows and capture never
+# starts. KEYCODE_WAKEUP alone is not enough (the screen-off timeout would re-sleep mid-class), so
+# set stay-on; capture the prior value to restore it afterwards (same ethos as the release reinstall).
+ensure_connected
+# Record the pre-run wake state so we can restore it: an asleep device woken for the run must be put
+# back to sleep at the end (which also re-locks a swipe lock), an already-awake device left awake.
+WAKE_STATE="$("$ADB" -s "$SERIAL" shell dumpsys power 2>/dev/null || true)"
+# Only a POSITIVELY confirmed not-awake prior state should be slept back at the end. A confirmed
+# Awake state, or an empty/unreadable read (adb hiccup), is left awake - a failed read must not
+# cause a power-state change.
+case "$WAKE_STATE" in
+  *mWakefulness=Awake*) WAS_AWAKE=1 ;;   # confirmed awake -> leave awake
+  "")                   WAS_AWAKE=1 ;;   # unreadable -> do not change power state
+  *)                    WAS_AWAKE=0 ;;   # confirmed not-awake (Asleep/Dozing) -> sleep at end
+esac
+PRIOR_STAYON="$("$ADB" -s "$SERIAL" shell settings get global stay_on_while_plugged_in 2>/dev/null | tr -d '\r' || true)"
+"$ADB" -s "$SERIAL" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+"$ADB" -s "$SERIAL" shell svc power stayon true >/dev/null 2>&1 || true
+"$ADB" -s "$SERIAL" shell wm dismiss-keyguard >/dev/null 2>&1 || true
+
+# Per-class process isolation. am instrument exits 0 even when tests fail, so the
 # result is read from the log, not the exit code.
 mkdir -p "$OUT_DIR"
+IFS=',' read -ra CLASS_ARR <<< "$CLASSES"
 ensure_connected
-# One am instrument session for all classes (fast). resetApp() in each test's @Before clears the
-# plugin's isCapturing flag, so captures restart cleanly between tests without per-process isolation.
-# Bounded at 120s so a hung test cannot block the script; the result is read from the log, not exit.
-timeout 120 "$ADB" -s "$SERIAL" shell am instrument -w -e class "$CLASSES" "$RUNNER" 2>&1 | tee "$OUT_DIR/instrument.log" || true
+# Fresh evidence: wipe the device journeys dir once before the loop (install does not clear it).
+"$ADB" -s "$SERIAL" shell rm -rf "/sdcard/Android/data/${PKG}/files/journeys" 2>/dev/null || true
+for cls in "${CLASS_ARR[@]}"; do
+  ensure_connected
+  # Fresh process per class: force-stop releases MediaProjection + the AudioPlaybackCapture
+  # policy slot and dismisses the auto-PiP window (all process-owned). pm clear is NOT used
+  # (it would wipe the journeys dir we accumulate). Home first so the next class launches clean.
+  "$ADB" -s "$SERIAL" shell am force-stop "$PKG" >/dev/null 2>&1 || true
+  "$ADB" -s "$SERIAL" shell input keyevent KEYCODE_HOME >/dev/null 2>&1 || true
+  sleep 0.3   # bounded insurance for the async AudioPlaybackCapture policy-slot release.
+  set +e
+  timeout 120 "$ADB" -s "$SERIAL" shell am instrument -w -e class "$cls" "$RUNNER" 2>&1 | tee "$OUT_DIR/instr-${cls}.log"
+  rc=${PIPESTATUS[0]}
+  set -e
+  [[ "$rc" == 124 ]] && echo "TIMEOUT (rc=124) on class $cls" >&2
+done
+ensure_connected
+"$ADB" -s "$SERIAL" shell am force-stop "$PKG" >/dev/null 2>&1 || true
 
 # Pull the screenshots regardless of pass/fail. timeout: a large pull over a flaky wireless link
 # can stall forever, which is what made the script "wait forever after the tests finished".
@@ -107,11 +144,26 @@ else
   echo "WARN: no release APK under $APK_BASE/release; left ${PKG} uninstalled on $SERIAL" >&2
 fi
 
+# Restore the stay-on setting we changed to keep the device awake during the run (only if we read a
+# numeric prior value; an empty/unknown reading is left untouched rather than guessed).
+if [[ "${PRIOR_STAYON:-}" =~ ^[0-9]+$ ]]; then
+  ensure_connected
+  "$ADB" -s "$SERIAL" shell settings put global stay_on_while_plugged_in "$PRIOR_STAYON" >/dev/null 2>&1 || true
+fi
+# If the device was asleep before we woke it, return it to sleep (also re-locks a swipe lock). This
+# MUST follow the stay-on restore above: a device that still has stay-on set refuses to sleep.
+if [[ "${WAS_AWAKE:-1}" == 0 ]]; then
+  "$ADB" -s "$SERIAL" shell input keyevent KEYCODE_SLEEP >/dev/null 2>&1 || true
+fi
+
 echo "----"
-if grep -q "FAILURES!!!" "$OUT_DIR/instrument.log"; then
-  echo "RESULT: SOME TESTS FAILED - see $OUT_DIR/instrument.log"
+notok="$(grep -L 'OK (' "$OUT_DIR"/instr-*.log 2>/dev/null || true)"
+hardfail="$(grep -l 'FAILURES!!!' "$OUT_DIR"/instr-*.log 2>/dev/null || true)"
+rc_suite=0
+if [[ -n "$notok$hardfail" ]]; then
+  echo "RESULT: SOME CLASSES FAILED/HUNG:"; printf '  %s\n' $notok $hardfail; rc_suite=1
 else
-  echo "RESULT: no test failures reported"
+  echo "RESULT: all classes passed"
 fi
 # Phase E2: a second, independent gate-failure signal straight from the pulled evidence. The in-test
 # check(r is ShotResult.Success) already fails such a test in the am-instrument log above; this scan
@@ -127,3 +179,5 @@ if [[ -d "$OUT_DIR/journeys" ]]; then
 else
   echo "(no screenshots pulled)"
 fi
+
+exit "$rc_suite"

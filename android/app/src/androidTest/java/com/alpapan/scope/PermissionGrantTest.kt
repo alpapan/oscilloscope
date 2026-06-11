@@ -72,6 +72,13 @@ class PermissionGrantTest {
 
         // Tapping it opens the system notification-access settings (a real Activity, leaving the WebView).
         JourneySupport.eval(s, "document.querySelector('.np-grant').click(); 'ok'")
+
+        // Wait for the notification-access list to be up, then drive the real Settings UI to grant.
+        // Capture stays running (the now-playing card needs state.running); Scope auto-PiPs to the
+        // bottom-right when it backgrounds, which does not cover the (left-side) Scope row. The row
+        // and toggle are driven with shell `input tap` coordinates (see tapCenter), which land
+        // regardless of the PiP window.
+        device.wait(Until.hasObject(By.scrollable(true)), 8000)
         enableScopeNotificationListenerInSettings()
 
         // The UI grant must actually flip the system setting - this is the authoritative gate.
@@ -80,9 +87,8 @@ class PermissionGrantTest {
             "notification listener not enabled after the UI grant flow; got: $enabled"
         }
 
-        // Return to the app via an explicit re-foreground Intent (REORDER_TO_FRONT), NOT pressBack
-        // counting: the Settings activity stack depth is OEM-/version-variable and an over-pop lands
-        // on the launcher (then the now-playing assertion would falsely pass on the backgrounded WebView).
+        // Return to the app (REORDER_TO_FRONT, not pressBack counting - Settings stack depth is
+        // OEM-/version-variable), then confirm the grant prompt is now gone in the now-playing view.
         check(JourneySupport.ensureForeground(s, timeoutMs = 8000)) { "could not re-foreground Scope after Settings excursion" }
         JourneySupport.cycleToView(s, "waveform")
         JourneySupport.cycleToView(s, "nowplaying")
@@ -94,33 +100,103 @@ class PermissionGrantTest {
      * checkboxes (Real-time / Conversations / Notifications / Silent). Granting access auto-selects
      * them, but Scope needs none - it reads media sessions via getActiveSessions, never delivered
      * notification content - so we turn them off to keep Scope's notification surface minimal, and
-     * now-playing must still work afterwards. This Settings flow is OS-version / OEM specific; the
-     * element ids below match Pixel / AOSP Android 16 and may need adjusting on other builds.
+     * now-playing must still work afterwards. This Settings flow is OS-version / OEM specific, so the
+     * toggle and category checkboxes are matched by stable framework resource ids in the android:
+     * namespace rather than Settings-app-private ids, and the Allow confirm falls back to its text.
      */
     private fun enableScopeNotificationListenerInSettings() {
+        try {
+            enableScopeNotificationListenerInSettingsImpl()
+        } catch (t: Throwable) {
+            // DIAGNOSTIC (removed once the mechanism is chosen): the in-process reads fail at a
+            // RANDOM site run-to-run under Scope's auto-PiP window, so probe on ANY failure rather
+            // than one fixed spot, recording which read mechanism can see the row label + the detail
+            // switch at the failing instant.
+            runCatching { probeReadMechanisms() }
+            throw t
+        }
+    }
+
+    /** Record, for each of three read mechanisms, whether it can see the Scope row label and the
+     *  detail-page switch at the moment a Settings-excursion read failed. */
+    private fun probeReadMechanisms() {
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
         val label = ctx.applicationInfo.loadLabel(ctx.packageManager).toString()
-        // The list is long: scroll the Scope row into view, then open its detail page.
-        val list = UiScrollable(UiSelector().scrollable(true)).apply { setAsVerticalList() }
-        val found = try { list.scrollIntoView(UiSelector().text(label)) } catch (_: Throwable) { false }
-        check(found) { "could not scroll to '$label' in the notification-access list" }
-        requireNotNull(device.findObject(By.text(label))) { "'$label' row not found after scroll" }.click()
-        // Detail page: flip the "Allow notification access" toggle (switchWidget).
-        val toggle = device.wait(Until.findObject(By.res("com.android.settings", "switchWidget")), 6000)
-        requireNotNull(toggle) { "'Allow notification access' toggle not found on the detail page" }.click()
-        // Confirmation dialog ("Allow notification access for $label?") -> Allow.
-        val allow = device.wait(Until.findObject(By.res("com.android.settings", "allow_button")), 5000)
-            ?: device.wait(Until.findObject(By.text("Allow")), 3000)
-        requireNotNull(allow) { "notification-access confirm dialog (Allow) not found" }.click()
+        val dir = JourneySupport.journeysDir()
+        val sb = StringBuilder()
+        // (a) legacy UiObject/UiSelector query path (different from UiObject2 By):
+        sb.append("legacyLabel=").append(runCatching { device.findObject(UiSelector().text(label)).exists() }.getOrDefault(false)).append('\n')
+        sb.append("legacySwitch=").append(runCatching { device.findObject(UiSelector().resourceId("android:id/switch_widget")).exists() }.getOrDefault(false)).append('\n')
+        // (b) shell uiautomator dump (SEPARATE process / separate UiAutomation connection):
+        val shell = runCatching {
+            device.executeShellCommand("uiautomator dump /sdcard/diag-shell.xml")
+            device.executeShellCommand("cat /sdcard/diag-shell.xml")
+        }.getOrDefault("")
+        sb.append("shellLabel=").append(shell.contains("text=\"$label\"")).append('\n')
+        sb.append("shellSwitch=").append(shell.contains("switch_widget")).append('\n')
+        java.io.File(dir, "diag-shell-dump.xml").writeText(shell)
+        // (c) in-process dumpWindowHierarchy (SAME connection as findObject):
+        val inproc = runCatching {
+            val f = java.io.File(dir, "diag-inproc-hier.xml"); device.dumpWindowHierarchy(f); f.readText()
+        }.getOrDefault("")
+        sb.append("inprocLabel=").append(inproc.contains("text=\"$label\"")).append('\n')
+        sb.append("inprocSwitch=").append(inproc.contains("switch_widget")).append('\n')
+        java.io.File(dir, "diag-mechanisms.txt").writeText(sb.toString())
+        runCatching { device.takeScreenshot(java.io.File(dir, "diag-detail.png")) }
+    }
+
+    private fun enableScopeNotificationListenerInSettingsImpl() {
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val label = ctx.applicationInfo.loadLabel(ctx.packageManager).toString()
+        // Drive the Settings UI with shell `input tap` (tapCenter), NOT UiObject2/UiDevice.click:
+        // with Scope's auto-PiP window present, in-process UiAutomation taps do not navigate, while a
+        // shell `input tap` at the same coordinates does (confirmed on-device A/B). Scroll the Scope
+        // row in, tap it, and confirm the detail page opened (its switch is present); re-scroll +
+        // re-tap if it did not.
+        var onDetail = false
+        var attempt = 0
+        while (!onDetail && attempt++ < 4) {
+            val list = UiScrollable(UiSelector().scrollable(true)).apply { setAsVerticalList() }
+            val found = try { list.scrollIntoView(UiSelector().text(label)) } catch (_: Throwable) { false }
+            check(found) { "could not scroll to '$label' in the notification-access list" }
+            tapCenter(requireNotNull(device.findObject(By.text(label))) { "'$label' row not found after scroll" })
+            onDetail = device.wait(Until.hasObject(By.res("android", "switch_widget")), 4000)
+        }
+        check(onDetail) { "notification-access detail page did not open after $attempt row-tap attempts" }
+        // Detail page: flip the "Allow notification access" toggle on (the framework switch id
+        // android:id/switch_widget; fall back to the Switch class). Guard on its checked state so a
+        // re-run that finds it already on does not toggle it back off.
+        val toggle = device.wait(Until.findObject(By.res("android", "switch_widget")), 4000)
+            ?: device.findObject(By.clazz("android.widget.Switch"))
+        requireNotNull(toggle) { "'Allow notification access' toggle not found on the detail page" }
+        if (!toggle.isChecked) {
+            tapCenter(toggle)
+            // Confirmation dialog ("Allow notification access for $label?") -> Allow.
+            val allow = device.wait(Until.findObject(By.res("com.android.settings", "allow_button")), 5000)
+                ?: device.wait(Until.findObject(By.text("Allow")), 3000)
+            tapCenter(requireNotNull(allow) { "notification-access confirm dialog (Allow) not found" })
+        }
         // Deselect every auto-selected category checkbox. Re-query each pass so a stale handle from
         // the re-render does not skip one; cap the loop as a backstop.
         device.wait(Until.hasObject(By.res("android", "checkbox")), 5000)
         var guard = 0
         while (guard++ < 6) {
             val checked = device.findObjects(By.res("android", "checkbox")).firstOrNull { it.isChecked } ?: break
-            checked.click()
+            tapCenter(checked)
             Thread.sleep(300)
         }
         check(JourneySupport.proveDialogState("perm-05-categories-deselected", "android:id/checkbox", timeoutMs = 3000) is ShotResult.Success)
+    }
+
+    /**
+     * Tap a UiObject2's visible centre via the `input` shell command (external InputManager
+     * injection), NOT UiObject2.click / UiDevice.click (in-process UiAutomation injection). With
+     * Scope's auto-PiP window present, the UiAutomation-dispatched tap does not navigate while a
+     * shell `input tap` at the same coordinates does (confirmed on-device). executeShellCommand
+     * blocks until the command completes.
+     */
+    private fun tapCenter(o: androidx.test.uiautomator.UiObject2) {
+        val b = o.visibleBounds
+        device.executeShellCommand("input tap ${b.centerX()} ${b.centerY()}")
     }
 }

@@ -15,6 +15,9 @@ object JourneySupport {
     private val instr get() = InstrumentationRegistry.getInstrumentation()
     val device: UiDevice get() = UiDevice.getInstance(instr)
 
+    /** The on-device dir where journey screenshots + diag json are written, then pulled by the harness. */
+    fun journeysDir(): File = File(instr.targetContext.getExternalFilesDir(null), "journeys").apply { mkdirs() }
+
     fun grantMic() = instr.uiAutomation.grantRuntimePermission(PKG, "android.permission.RECORD_AUDIO")
 
     /**
