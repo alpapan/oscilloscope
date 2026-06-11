@@ -32,6 +32,8 @@ test-results/
 
 # Working artefacts - kept local, never committed (see CLAUDE.md "Git is for code")
 CLAUDE.md
+# Local Claude Code agent config (settings, hooks, local state) - never project content.
+.claude/
 
 # Google Play submission scratch artefacts - kept local, never committed.
 # play-listing/ holds screenshots, feature graphic, TV banner, etc.
