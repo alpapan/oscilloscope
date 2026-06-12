@@ -71,6 +71,17 @@ timeout 30 "$ADB" -s "$SERIAL" uninstall "${PKG}.test" >/dev/null 2>&1 || true
 install_apk "$APP_APK" "$PKG"          || { echo "ERROR: app APK did not install on $SERIAL" >&2; exit 1; }
 install_apk "$TEST_APK" "${PKG}.test"  || { echo "ERROR: androidTest APK did not install on $SERIAL" >&2; exit 1; }
 
+# Android 13/14 "restricted settings": a sideloaded (untrusted-installer) build is blocked from
+# being granted notification-listener / accessibility access - tapping the toggle raises
+# com.android.settings.ActionDisabledByAppOpsDialog ("For your security, this setting is currently
+# unavailable"). Setting the ACCESS_RESTRICTED_SETTINGS app-op to "allow" is the exact equivalent of
+# the user choosing App info -> Allow restricted settings (AOSP Settings sets the same op/mode). The
+# op RESETS to deny on every (re)install on Android 14, so it must be (re)set here - after the
+# install above, before the instrumentation runs. Non-fatal: devices where the op is absent or
+# restricted settings do not apply (e.g. Android 16, FTL emulators) simply no-op.
+ensure_connected
+timeout 20 "$ADB" -s "$SERIAL" shell appops set "$PKG" ACCESS_RESTRICTED_SETTINGS allow >/dev/null 2>&1 || true
+
 # Start from a clean foreground: go to the home screen so the suite launches from a known state,
 # not on top of whatever app is currently open (a foreground app can interfere with system-UI
 # steps such as the notification-access settings navigation).

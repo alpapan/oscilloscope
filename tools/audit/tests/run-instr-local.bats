@@ -257,3 +257,21 @@ teardown() { rm -rf "$TESTDIR"; }
   [ "$status" -eq 0 ]
   ! grep -q -- "input keyevent KEYCODE_SLEEP" "${TESTDIR}/adb.argv"
 }
+
+# --- Restricted-settings block (Android 14 sideload): clear ACCESS_RESTRICTED_SETTINGS ---
+
+@test "clears the ACCESS_RESTRICTED_SETTINGS app-op after install so the notification-listener toggle is grantable" {
+  run env "$WRAP" 192.168.0.99:5555 com.test.A,com.test.B
+  [ "$status" -eq 0 ]
+  grep -q -- "appops set com.alpapan.scope ACCESS_RESTRICTED_SETTINGS allow" "${TESTDIR}/adb.argv"
+  # The op gates the notification-listener / accessibility toggle for an untrusted-installer
+  # (sideloaded) build on Android 13/14, and it RESETS to deny on every (re)install - so the clear
+  # must run AFTER the app install (the package must exist) and BEFORE the first am-instrument
+  # (so the toggle is not blocked by the ActionDisabledByAppOpsDialog).
+  appop_line="$(grep -n -- "appops set com.alpapan.scope ACCESS_RESTRICTED_SETTINGS allow" "${TESTDIR}/adb.argv" | head -1 | cut -d: -f1)"
+  install_line="$(grep -n -E -- "install .*debug/scope-0.7.apk" "${TESTDIR}/adb.argv" | head -1 | cut -d: -f1)"
+  instr_line="$(grep -n -- "am instrument" "${TESTDIR}/adb.argv" | head -1 | cut -d: -f1)"
+  [ -n "$appop_line" ] && [ -n "$install_line" ] && [ -n "$instr_line" ]
+  [ "$appop_line" -gt "$install_line" ]
+  [ "$appop_line" -lt "$instr_line" ]
+}

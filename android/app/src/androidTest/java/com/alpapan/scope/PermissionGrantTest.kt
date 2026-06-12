@@ -150,38 +150,62 @@ class PermissionGrantTest {
         val label = ctx.applicationInfo.loadLabel(ctx.packageManager).toString()
         // Drive the Settings UI with shell `input tap` (tapCenter), NOT UiObject2/UiDevice.click:
         // with Scope's auto-PiP window present, in-process UiAutomation taps do not navigate, while a
-        // shell `input tap` at the same coordinates does (confirmed on-device A/B). Scroll the Scope
-        // row in, tap it, and confirm the detail page opened (its switch is present); re-scroll +
-        // re-tap if it did not.
+        // shell `input tap` at the same coordinates does (confirmed on-device). READ via legacy
+        // UiObject (UiSelector / .exists() / .waitForExists()), NOT UiObject2 `By` + `Until.*`: under
+        // the PiP window the UiObject2 live queries return false negatives (e.g. the onDetail switch
+        // wait reporting absent while the toggle is plainly on screen), which spuriously re-ran the
+        // row loop on the detail page; legacy UiObject reads are reliable on the Nokia (diag-proven).
+        val switchSel = UiSelector().resourceId("android:id/switch_widget")
         var onDetail = false
         var attempt = 0
         while (!onDetail && attempt++ < 4) {
+            // Already on the detail page? Then a prior pass navigated but its post-tap wait missed it -
+            // break instead of re-tapping the (now off-screen) list row, which would throw "row not
+            // found". The instant exists() check is reliable once the page settles (diag-proven), even
+            // when the post-tap detail wait was not.
+            if (device.findObject(switchSel).exists()) { onDetail = true; break }
             val list = UiScrollable(UiSelector().scrollable(true)).apply { setAsVerticalList() }
             val found = try { list.scrollIntoView(UiSelector().text(label)) } catch (_: Throwable) { false }
             check(found) { "could not scroll to '$label' in the notification-access list" }
-            tapCenter(requireNotNull(device.findObject(By.text(label))) { "'$label' row not found after scroll" })
-            onDetail = device.wait(Until.hasObject(By.res("android", "switch_widget")), 4000)
+            // Match the Settings list-row title (android:id/title) specifically, not a bare text
+            // match: Scope's own auto-PiP WebView exposes its window title "$label" as a node, so an
+            // unscoped match taps the PiP window instead of the row and the detail page never opens.
+            val row = device.findObject(UiSelector().resourceId("android:id/title").text(label))
+            check(row.exists()) { "'$label' row not found after scroll" }
+            tapCenter(row)
+            // Poll for the detail page via the reliable instant exists() check: both UiObject2
+            // Until.* and legacy waitForExists return false negatives right after navigation under the
+            // PiP window (re-querying a fresh handle each pass avoids that), so do not gate on them.
+            val deadline = System.currentTimeMillis() + 5000
+            while (System.currentTimeMillis() < deadline && !device.findObject(switchSel).exists()) Thread.sleep(200)
+            onDetail = device.findObject(switchSel).exists()
         }
         check(onDetail) { "notification-access detail page did not open after $attempt row-tap attempts" }
-        // Detail page: flip the "Allow notification access" toggle on (the framework switch id
+        // Detail page: flip the "Allow notification access" toggle on (framework switch id
         // android:id/switch_widget; fall back to the Switch class). Guard on its checked state so a
         // re-run that finds it already on does not toggle it back off.
-        val toggle = device.wait(Until.findObject(By.res("android", "switch_widget")), 4000)
-            ?: device.findObject(By.clazz("android.widget.Switch"))
-        requireNotNull(toggle) { "'Allow notification access' toggle not found on the detail page" }
+        var toggle = device.findObject(switchSel)
+        if (!toggle.exists()) toggle = device.findObject(UiSelector().className("android.widget.Switch"))
+        check(toggle.exists()) { "'Allow notification access' toggle not found on the detail page" }
         if (!toggle.isChecked) {
             tapCenter(toggle)
-            // Confirmation dialog ("Allow notification access for $label?") -> Allow.
-            val allow = device.wait(Until.findObject(By.res("com.android.settings", "allow_button")), 5000)
-                ?: device.wait(Until.findObject(By.text("Allow")), 3000)
-            tapCenter(requireNotNull(allow) { "notification-access confirm dialog (Allow) not found" })
+            // Confirmation dialog ("Allow notification access for $label?") -> Allow. waitForExists
+            // polls up to 5s for an "Allow" text node (OEM-portable); if it never appears, fall back
+            // to a Settings-scoped allow_button id.
+            var allow = device.findObject(UiSelector().text("Allow"))
+            if (!allow.waitForExists(5000)) {
+                allow = device.findObject(UiSelector().resourceId("com.android.settings:id/allow_button"))
+            }
+            check(allow.exists()) { "notification-access confirm dialog (Allow) not found" }
+            tapCenter(allow)
         }
-        // Deselect every auto-selected category checkbox. Re-query each pass so a stale handle from
-        // the re-render does not skip one; cap the loop as a backstop.
-        device.wait(Until.hasObject(By.res("android", "checkbox")), 5000)
+        // Deselect every auto-selected category checkbox. Re-query each pass (legacy UiObject is a
+        // live handle) so a stale snapshot does not skip a freshly re-rendered row; cap as a backstop.
+        device.findObject(UiSelector().resourceId("android:id/checkbox")).waitForExists(5000)
         var guard = 0
         while (guard++ < 6) {
-            val checked = device.findObjects(By.res("android", "checkbox")).firstOrNull { it.isChecked } ?: break
+            val checked = device.findObject(UiSelector().resourceId("android:id/checkbox").checked(true))
+            if (!checked.exists()) break
             tapCenter(checked)
             Thread.sleep(300)
         }
@@ -189,14 +213,12 @@ class PermissionGrantTest {
     }
 
     /**
-     * Tap a UiObject2's visible centre via the `input` shell command (external InputManager
-     * injection), NOT UiObject2.click / UiDevice.click (in-process UiAutomation injection). With
-     * Scope's auto-PiP window present, the UiAutomation-dispatched tap does not navigate while a
+     * Tap a screen point / a node's visible centre via the `input` shell command (external
+     * InputManager injection), NOT UiObject(2)/UiDevice.click (in-process UiAutomation injection):
+     * with Scope's auto-PiP window present the UiAutomation-dispatched tap does not navigate while a
      * shell `input tap` at the same coordinates does (confirmed on-device). executeShellCommand
      * blocks until the command completes.
      */
-    private fun tapCenter(o: androidx.test.uiautomator.UiObject2) {
-        val b = o.visibleBounds
-        device.executeShellCommand("input tap ${b.centerX()} ${b.centerY()}")
-    }
+    private fun tapCenter(x: Int, y: Int) { device.executeShellCommand("input tap $x $y") }
+    private fun tapCenter(o: androidx.test.uiautomator.UiObject) { val b = o.visibleBounds; tapCenter(b.centerX(), b.centerY()) }
 }
