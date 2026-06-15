@@ -70,6 +70,15 @@ class PermissionGrantTest {
         // Access is off, so the card offers a "Grant access" button (.np-grant in main.js).
         check(JourneySupport.proveScopeState(s, "perm-03-notif-prompt", "!!document.querySelector('.np-grant')") is ShotResult.Success)
 
+        // Pre-allow restricted settings BEFORE Settings opens. On an Android 13/14 sideload the
+        // notification-access toggle renders DISABLED if the explicit ACCESS_RESTRICTED_SETTINGS allow
+        // op is not in place when Settings BUILDS the detail page (the install resets the op
+        // asynchronously, so the harness's earlier set can be undone before the page renders). Setting
+        // it here - after that async reset has long settled, just before the page opens - makes the
+        // page render the toggle enabled. enableScopeNotificationListenerInSettings re-asserts it and
+        // reloads as a backstop if the render still lost the race.
+        allowRestrictedSettings()
+
         // Tapping it opens the system notification-access settings (a real Activity, leaving the WebView).
         JourneySupport.eval(s, "document.querySelector('.np-grant').click(); 'ok'")
 
@@ -105,88 +114,37 @@ class PermissionGrantTest {
      * namespace rather than Settings-app-private ids, and the Allow confirm falls back to its text.
      */
     private fun enableScopeNotificationListenerInSettings() {
-        try {
-            enableScopeNotificationListenerInSettingsImpl()
-        } catch (t: Throwable) {
-            // DIAGNOSTIC (removed once the mechanism is chosen): the in-process reads fail at a
-            // RANDOM site run-to-run under Scope's auto-PiP window, so probe on ANY failure rather
-            // than one fixed spot, recording which read mechanism can see the row label + the detail
-            // switch at the failing instant.
-            runCatching { probeReadMechanisms() }
-            throw t
-        }
-    }
-
-    /** Record, for each of three read mechanisms, whether it can see the Scope row label and the
-     *  detail-page switch at the moment a Settings-excursion read failed. */
-    private fun probeReadMechanisms() {
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
         val label = ctx.applicationInfo.loadLabel(ctx.packageManager).toString()
-        val dir = JourneySupport.journeysDir()
-        val sb = StringBuilder()
-        // (a) legacy UiObject/UiSelector query path (different from UiObject2 By):
-        sb.append("legacyLabel=").append(runCatching { device.findObject(UiSelector().text(label)).exists() }.getOrDefault(false)).append('\n')
-        sb.append("legacySwitch=").append(runCatching { device.findObject(UiSelector().resourceId("android:id/switch_widget")).exists() }.getOrDefault(false)).append('\n')
-        // (b) shell uiautomator dump (SEPARATE process / separate UiAutomation connection):
-        val shell = runCatching {
-            device.executeShellCommand("uiautomator dump /sdcard/diag-shell.xml")
-            device.executeShellCommand("cat /sdcard/diag-shell.xml")
-        }.getOrDefault("")
-        sb.append("shellLabel=").append(shell.contains("text=\"$label\"")).append('\n')
-        sb.append("shellSwitch=").append(shell.contains("switch_widget")).append('\n')
-        java.io.File(dir, "diag-shell-dump.xml").writeText(shell)
-        // (c) in-process dumpWindowHierarchy (SAME connection as findObject):
-        val inproc = runCatching {
-            val f = java.io.File(dir, "diag-inproc-hier.xml"); device.dumpWindowHierarchy(f); f.readText()
-        }.getOrDefault("")
-        sb.append("inprocLabel=").append(inproc.contains("text=\"$label\"")).append('\n')
-        sb.append("inprocSwitch=").append(inproc.contains("switch_widget")).append('\n')
-        java.io.File(dir, "diag-mechanisms.txt").writeText(sb.toString())
-        runCatching { device.takeScreenshot(java.io.File(dir, "diag-detail.png")) }
-    }
-
-    private fun enableScopeNotificationListenerInSettingsImpl() {
-        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
-        val label = ctx.applicationInfo.loadLabel(ctx.packageManager).toString()
-        // Drive the Settings UI with shell `input tap` (tapCenter), NOT UiObject2/UiDevice.click:
-        // with Scope's auto-PiP window present, in-process UiAutomation taps do not navigate, while a
-        // shell `input tap` at the same coordinates does (confirmed on-device). READ via legacy
-        // UiObject (UiSelector / .exists() / .waitForExists()), NOT UiObject2 `By` + `Until.*`: under
-        // the PiP window the UiObject2 live queries return false negatives (e.g. the onDetail switch
-        // wait reporting absent while the toggle is plainly on screen), which spuriously re-ran the
-        // row loop on the detail page; legacy UiObject reads are reliable on the Nokia (diag-proven).
         val switchSel = UiSelector().resourceId("android:id/switch_widget")
-        var onDetail = false
-        var attempt = 0
-        while (!onDetail && attempt++ < 4) {
-            // Already on the detail page? Then a prior pass navigated but its post-tap wait missed it -
-            // break instead of re-tapping the (now off-screen) list row, which would throw "row not
-            // found". The instant exists() check is reliable once the page settles (diag-proven), even
-            // when the post-tap detail wait was not.
-            if (device.findObject(switchSel).exists()) { onDetail = true; break }
-            val list = UiScrollable(UiSelector().scrollable(true)).apply { setAsVerticalList() }
-            val found = try { list.scrollIntoView(UiSelector().text(label)) } catch (_: Throwable) { false }
-            check(found) { "could not scroll to '$label' in the notification-access list" }
-            // Match the Settings list-row title (android:id/title) specifically, not a bare text
-            // match: Scope's own auto-PiP WebView exposes its window title "$label" as a node, so an
-            // unscoped match taps the PiP window instead of the row and the detail page never opens.
-            val row = device.findObject(UiSelector().resourceId("android:id/title").text(label))
-            check(row.exists()) { "'$label' row not found after scroll" }
-            tapCenter(row)
-            // Poll for the detail page via the reliable instant exists() check: both UiObject2
-            // Until.* and legacy waitForExists return false negatives right after navigation under the
-            // PiP window (re-querying a fresh handle each pass avoids that), so do not gate on them.
-            val deadline = System.currentTimeMillis() + 5000
-            while (System.currentTimeMillis() < deadline && !device.findObject(switchSel).exists()) Thread.sleep(200)
-            onDetail = device.findObject(switchSel).exists()
-        }
-        check(onDetail) { "notification-access detail page did not open after $attempt row-tap attempts" }
-        // Detail page: flip the "Allow notification access" toggle on (framework switch id
-        // android:id/switch_widget; fall back to the Switch class). Guard on its checked state so a
-        // re-run that finds it already on does not toggle it back off.
+        navigateToNotificationDetail(label, switchSel)
+        // Detail page: the "Allow notification access" toggle (framework switch id
+        // android:id/switch_widget; fall back to the Switch class). The later isChecked guard avoids
+        // toggling it back off if a re-run finds it already on.
         var toggle = device.findObject(switchSel)
         if (!toggle.exists()) toggle = device.findObject(UiSelector().className("android.widget.Switch"))
         check(toggle.exists()) { "'Allow notification access' toggle not found on the detail page" }
+        // On an Android 13/14 sideload the toggle can render DISABLED (restricted) even though appops
+        // already reports `allow`, when the explicit allow op was not in place at the instant Settings
+        // BUILT this page. The rendered switch then stays disabled and tapping it raises
+        // ActionDisabledByAppOpsDialog ("Restricted setting"). Re-assert the op and reload the detail
+        // page (fresh notification-listener-settings intent) until the switch renders enabled.
+        var reloads = 0
+        while (!toggle.isEnabled && reloads++ < 3) {
+            allowRestrictedSettings()
+            // force-stop Settings before re-firing the intent: a bare `am start` resumes the existing
+            // Settings instance WITHOUT rebuilding the detail fragment, so the stale disabled switch
+            // persists and navigateToNotificationDetail's "already on detail" short-circuit re-finds it.
+            // Killing Settings drops that fragment, so the next start rebuilds it with the op now allow.
+            device.executeShellCommand("am force-stop com.android.settings")
+            device.executeShellCommand("am start -a android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
+            device.wait(Until.hasObject(By.scrollable(true)), 8000)
+            navigateToNotificationDetail(label, switchSel)
+            toggle = device.findObject(switchSel)
+            if (!toggle.exists()) toggle = device.findObject(UiSelector().className("android.widget.Switch"))
+            check(toggle.exists()) { "'Allow notification access' toggle vanished after reload" }
+        }
+        check(toggle.isEnabled) { "'Allow notification access' toggle still disabled (restricted) after $reloads reload(s)" }
         if (!toggle.isChecked) {
             tapCenter(toggle)
             // Confirmation dialog ("Allow notification access for $label?") -> Allow. waitForExists
@@ -210,6 +168,49 @@ class PermissionGrantTest {
             Thread.sleep(300)
         }
         check(JourneySupport.proveDialogState("perm-05-categories-deselected", "android:id/checkbox", timeoutMs = 3000) is ShotResult.Success)
+    }
+
+    /**
+     * Scroll the notification-access list to the Scope row and tap into its detail page. Driven with
+     * shell `input tap` (tapCenter), NOT UiObject2/UiDevice.click: with Scope's auto-PiP window present
+     * in-process UiAutomation taps do not navigate while a shell `input tap` at the same coordinates
+     * does (confirmed on-device). Reads use legacy UiObject (.exists()), NOT UiObject2 `By` + `Until.*`,
+     * which give false negatives under the PiP window. Idempotent: callable again to reload the detail.
+     */
+    private fun navigateToNotificationDetail(label: String, switchSel: UiSelector) {
+        var onDetail = false
+        var attempt = 0
+        while (!onDetail && attempt++ < 4) {
+            // Already on the detail page? A prior pass navigated but its post-tap wait missed it - break
+            // instead of re-tapping the (now off-screen) list row, which would throw "row not found".
+            if (device.findObject(switchSel).exists()) { onDetail = true; break }
+            val list = UiScrollable(UiSelector().scrollable(true)).apply { setAsVerticalList() }
+            val found = try { list.scrollIntoView(UiSelector().text(label)) } catch (_: Throwable) { false }
+            check(found) { "could not scroll to '$label' in the notification-access list" }
+            // Match the Settings list-row title (android:id/title) specifically: Scope's own auto-PiP
+            // WebView exposes its window title "$label" as a node, so an unscoped match taps the PiP
+            // window instead of the row and the detail page never opens.
+            val row = device.findObject(UiSelector().resourceId("android:id/title").text(label))
+            check(row.exists()) { "'$label' row not found after scroll" }
+            tapCenter(row)
+            // Poll for the detail page via the reliable instant exists() check (UiObject2 Until.* and
+            // legacy waitForExists give false negatives right after navigation under the PiP window).
+            val deadline = System.currentTimeMillis() + 5000
+            while (System.currentTimeMillis() < deadline && !device.findObject(switchSel).exists()) Thread.sleep(200)
+            onDetail = device.findObject(switchSel).exists()
+        }
+        check(onDetail) { "notification-access detail page did not open after $attempt row-tap attempts" }
+    }
+
+    /**
+     * Explicitly allow restricted settings for Scope - the exact equivalent of App info -> Allow
+     * restricted settings (AOSP Settings sets the same OP_ACCESS_RESTRICTED_SETTINGS / MODE_ALLOWED).
+     * On an Android 13/14 sideload (installer=null) this op gates the notification-listener toggle and
+     * resets on every (re)install. Instrumentation runs under the UiAutomation shell identity, which
+     * holds MANAGE_APP_OPS_MODES, so the set succeeds.
+     */
+    private fun allowRestrictedSettings() {
+        device.executeShellCommand("cmd appops set ${JourneySupport.PKG} ACCESS_RESTRICTED_SETTINGS allow")
     }
 
     /**

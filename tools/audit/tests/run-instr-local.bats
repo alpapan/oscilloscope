@@ -16,7 +16,31 @@ case "\$*" in
   *"get-state"*) echo "device" ;;
   *"settings get global stay_on_while_plugged_in"*) echo "0" ;;
   *"dumpsys power"*) [[ "\${STUB_WAKEFULNESS:-Awake}" == "__none__" ]] || echo "mWakefulness=\${STUB_WAKEFULNESS:-Awake}" ;;
-  *"pm list packages"*) echo "package:com.alpapan.scope"; echo "package:com.alpapan.scope.test" ;;
+  *"pm list packages"*) [[ "\${STUB_PKG_ABSENT:-}" == 1 ]] || { echo "package:com.alpapan.scope"; echo "package:com.alpapan.scope.test"; } ;;
+  *"dumpsys package installer"*)
+    # Model orphaned PackageInstaller sessions only when a test asks for them (STUB_ORPHAN_PAYLOAD=1).
+    # Faithful to real dumpsys: an "Active install sessions:" section followed by a "Finalized install
+    # sessions:" section. 222 = a Play/vending session (must NEVER be touched); 333 = a shell session
+    # already destroyed (must not be re-abandoned); 111 = a shell-initiated, still-live orphan placed
+    # LAST in the active section AND followed by a Finalized shell session whose mDestroyed=true must
+    # NOT bleed into 111's state (regression guard for the section-boundary parse bug).
+    if [[ "\${STUB_ORPHAN_PAYLOAD:-}" == 1 ]]; then
+      echo "Active install sessions:"
+      echo "  Active Session 222:"
+      echo "    installInitiatingPackageName=com.android.vending installerPackageName=com.android.vending"
+      echo "    mCommitted=true mSealed=true mDestroyed=false mFinalStatus=0"
+      echo "  Active Session 333:"
+      echo "    installInitiatingPackageName=com.android.shell mInstallerUid=2000"
+      echo "    mCommitted=true mSealed=true mDestroyed=true mFinalStatus=0"
+      echo "  Active Session 111:"
+      echo "    installInitiatingPackageName=com.android.shell mInstallerUid=2000"
+      echo "    mCommitted=true mSealed=true mDestroyed=false mFinalStatus=0"
+      echo "Finalized install sessions:"
+      echo "  Finalized Session 999:"
+      echo "    installInitiatingPackageName=com.android.shell mInstallerUid=2000"
+      echo "    mCommitted=true mSealed=true mDestroyed=true mFinalStatus=1"
+    fi
+    ;;
   *"am instrument"*)
     # The static "OK (7 tests)" count is intentional: this is a purpose-built unit stub,
     # not a realistic per-class test runner, so every invocation reports the same count.
@@ -144,6 +168,19 @@ teardown() { rm -rf "$TESTDIR"; }
   [ -n "$rm_line" ] && [ -n "$instr_line" ] && [ "$rm_line" -lt "$instr_line" ]
 }
 
+@test "runs AudioCaptureTest before PermissionGrantTest (audio-policy orphan isolation)" {
+  run env "$WRAP" 192.168.0.99:5555
+  [ "$status" -eq 0 ]
+  # AudioCaptureTest asserts captured-audio RMS>0. A prior class's force-stopped AudioPlaybackCapture
+  # orphans an audio-policy mix that makes the NEXT class's capture mix read silence (an Android
+  # AudioPlaybackCapture limitation with no app-side recovery; only a reboot clears it). So the one
+  # audio-asserting class must run FIRST, before any capture-churn class (PermissionGrantTest etc.).
+  audio_line="$(grep -n -- "am instrument.*com.alpapan.scope.AudioCaptureTest" "${TESTDIR}/adb.argv" | head -1 | cut -d: -f1)"
+  perm_line="$(grep -n -- "am instrument.*com.alpapan.scope.PermissionGrantTest" "${TESTDIR}/adb.argv" | head -1 | cut -d: -f1)"
+  [ -n "$audio_line" ] && [ -n "$perm_line" ]
+  [ "$audio_line" -lt "$perm_line" ]
+}
+
 @test "runs am instrument once per class" {
   run env "$WRAP" 192.168.0.99:5555 com.test.A,com.test.B,com.test.C
   [ "$status" -eq 0 ]
@@ -161,6 +198,25 @@ teardown() { rm -rf "$TESTDIR"; }
   [ "$status" -eq 0 ]
   # One force-stop before each of the 3 classes (a trailing teardown force-stop is also fine).
   [ "$(grep -c -- "am force-stop com.alpapan.scope" "${TESTDIR}/adb.argv")" -ge 3 ]
+}
+
+@test "revokes RECORD_AUDIO between classes so a prior grant does not kill the next class" {
+  run env "$WRAP" 192.168.0.99:5555 com.test.A,com.test.B,com.test.C
+  [ "$status" -eq 0 ]
+  # A class that grants RECORD_AUDIO (AudioCaptureTest) leaves it granted; PermissionGrantTest's
+  # @Before then revokes it IN-PROCESS, and revoking a GRANTED runtime permission force-stops the app
+  # - which is the instrumentation process - so PermissionGrantTest reports "Process crashed". Revoking
+  # it here between classes (app already force-stopped) makes that in-test revoke a harmless no-op.
+  [ "$(grep -c -- "pm revoke com.alpapan.scope android.permission.RECORD_AUDIO" "${TESTDIR}/adb.argv")" -ge 3 ]
+}
+
+@test "force-stops the Settings app between classes to clear a stuck restricted-settings modal" {
+  run env "$WRAP" 192.168.0.99:5555 com.test.A,com.test.B,com.test.C
+  [ "$status" -eq 0 ]
+  # A restricted-settings ActionDisabledByAppOpsDialog is a com.android.settings modal; force-stopping
+  # only the Scope process leaves it on screen, where it poisons the next class ("could not scroll").
+  # Force-stop Settings before each class so one failure does not cascade into the rest of the suite.
+  [ "$(grep -c -- "am force-stop com.android.settings" "${TESTDIR}/adb.argv")" -ge 3 ]
 }
 
 @test "pulls the journeys dir exactly once" {
@@ -274,4 +330,53 @@ teardown() { rm -rf "$TESTDIR"; }
   [ -n "$appop_line" ] && [ -n "$install_line" ] && [ -n "$instr_line" ]
   [ "$appop_line" -gt "$install_line" ]
   [ "$appop_line" -lt "$instr_line" ]
+}
+
+# --- Orphaned PackageInstaller sessions: abandon shell-initiated live orphans ---
+# An `adb install` interrupted after commit but before finalize leaves a committed-but-unfinalized
+# session orphaned on the device. PackageManager can finalize one mid-test (force-stopping the
+# instrumentation -> "Process crashed"), and in bulk they jam PackageInstaller so installs hang.
+# They never clear on their own (mCommitted, stuck ~90%); abandoning is the only lever.
+
+@test "abandons a live shell-initiated orphan install session before the class loop" {
+  export STUB_ORPHAN_PAYLOAD=1
+  run env "$WRAP" 192.168.0.99:5555 com.test.A,com.test.B,com.test.C
+  [ "$status" -eq 0 ]
+  # The shell-initiated, still-live orphan (111) must be abandoned.
+  grep -q -- "pm install-abandon 111" "${TESTDIR}/adb.argv"
+  # The abandon must happen BEFORE the first am-instrument, so no orphan can finalize mid-class.
+  abandon_line="$(grep -n -- "pm install-abandon 111" "${TESTDIR}/adb.argv" | head -1 | cut -d: -f1)"
+  instr_line="$(grep -n -- "am instrument" "${TESTDIR}/adb.argv" | head -1 | cut -d: -f1)"
+  [ -n "$abandon_line" ] && [ -n "$instr_line" ] && [ "$abandon_line" -lt "$instr_line" ]
+}
+
+@test "never abandons a Play/vending or an already-destroyed session" {
+  export STUB_ORPHAN_PAYLOAD=1
+  run env "$WRAP" 192.168.0.99:5555 com.test.A,com.test.B,com.test.C
+  [ "$status" -eq 0 ]
+  # 222 is a com.android.vending (Play) session - touching it would disrupt a real Play update.
+  ! grep -q -- "pm install-abandon 222" "${TESTDIR}/adb.argv"
+  # 333 is a shell session already mDestroyed=true - re-abandoning is pointless noise.
+  ! grep -q -- "pm install-abandon 333" "${TESTDIR}/adb.argv"
+}
+
+@test "a clean installer with no orphan sessions issues no abandon and still runs the suite" {
+  # Default stub: dumpsys reports no orphan sessions, so the sweep must be a no-op.
+  run env "$WRAP" 192.168.0.99:5555 com.test.A,com.test.B,com.test.C
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -- "pm install-abandon" "${TESTDIR}/adb.argv")" -eq 0 ]
+  [[ "$output" == *"all classes passed"* ]]
+}
+
+@test "install_apk abandons orphan sessions between failed install attempts (does not accumulate)" {
+  # A failed install attempt can itself leave an orphan; install_apk must abandon orphans on retry so
+  # they do not pile up and jam PackageInstaller. Force the app install to never stick (STUB_PKG_ABSENT)
+  # so install_apk retries and fails, and the script exits before the pre-loop sweep - isolating the
+  # in-install_apk cleanup as the only possible source of the abandon.
+  export STUB_PKG_ABSENT=1
+  export STUB_ORPHAN_PAYLOAD=1
+  run env "$WRAP" 192.168.0.99:5555 com.test.A,com.test.B,com.test.C
+  [ "$status" -ne 0 ]                                   # app install never sticks -> script aborts
+  [ "$(grep -c "am instrument" "${TESTDIR}/adb.argv")" -eq 0 ]   # never reached the class loop
+  grep -q -- "pm install-abandon 111" "${TESTDIR}/adb.argv"      # orphan abandoned during retries
 }

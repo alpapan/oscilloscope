@@ -14,7 +14,13 @@ if [[ -z "$SERIAL" ]]; then
   echo "usage: tools/audit/run-instr-local.sh <adb-serial> [test-classes]" >&2
   exit 2
 fi
-CLASSES="${2:-com.alpapan.scope.PermissionGrantTest,com.alpapan.scope.AudioCaptureTest,com.alpapan.scope.ViewWalkTest,com.alpapan.scope.PaletteWalkTest,com.alpapan.scope.DrawerControlsTest,com.alpapan.scope.GestureTest,com.alpapan.scope.PipLifecycleTest,com.alpapan.scope.MicModeViewExclusionTest,com.alpapan.scope.NowPlayingTest}"
+# AudioCaptureTest is listed FIRST deliberately: it is the only class that asserts captured-audio
+# RMS>0, and a prior class's force-stopped AudioPlaybackCapture orphans an audio-policy mix that makes
+# the next capture read pure silence (an Android AudioPlaybackCapture limitation with no app-side or
+# non-root recovery in a boot session - proven on the Nokia X30; only a reboot clears it). Running it
+# before any capture-churn class gives it a clean mix. The other capturing classes only assert that a
+# view renders, not audio content, so their (possibly silenced) captures still pass.
+CLASSES="${2:-com.alpapan.scope.AudioCaptureTest,com.alpapan.scope.PermissionGrantTest,com.alpapan.scope.ViewWalkTest,com.alpapan.scope.PaletteWalkTest,com.alpapan.scope.DrawerControlsTest,com.alpapan.scope.GestureTest,com.alpapan.scope.PipLifecycleTest,com.alpapan.scope.MicModeViewExclusionTest,com.alpapan.scope.NowPlayingTest}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -38,6 +44,37 @@ ensure_connected() {
   timeout 25 "$ADB" -s "$SERIAL" wait-for-device >/dev/null 2>&1 || true
 }
 
+# Abandon orphaned PackageInstaller sessions left by interrupted adb installs. An `adb install` cut off
+# AFTER the device commits the session but BEFORE it finalizes (a wireless blip, or the install timeout
+# below killing the client) leaves a committed-but-unfinalized session on the device. PackageManager
+# can finalize one LATER - mid-test - force-stopping the instrumentation process ("Process crashed");
+# and in bulk they jam PackageInstaller so fresh installs hang. They do not clear on their own
+# (mCommitted, stuck at ~90% progress), so abandoning is the only recovery. Touch ONLY shell/uid-2000
+# (adb-initiated) sessions still live (mDestroyed=false) - never Play/system (com.android.vending)
+# sessions. Every device call is bounded so a jammed installer cannot hang the run.
+abandon_orphan_install_sessions() {
+  local dump ids sid
+  dump="$(timeout 20 "$ADB" -s "$SERIAL" shell dumpsys package installer 2>/dev/null || true)"
+  # Parse ONLY the "Active install sessions:" section. dumpsys also prints "Finalized install
+  # sessions:" (already-applied/destroyed sessions whose mDestroyed=true lines would otherwise bleed
+  # into and clear the last Active block's live flag). The section is bounded: it opens at the
+  # "Active install sessions:" header and ends at the next non-indented (column-0) line. Within it,
+  # one target per "Active Session N:" block: shell-initiated AND not already destroyed; flush the
+  # previous block's id at the next header, at the section end, or at EOF.
+  ids="$(printf '%s\n' "$dump" | awk '
+    /^Active install sessions:/ { sect=1; next }
+    /^[^ ]/ { if (sect && id != "" && shell && live) print id; id=""; sect=0 }
+    sect && /Active Session [0-9]+:/ { if (id != "" && shell && live) print id; id=$3; sub(/:/,"",id); shell=0; live=0 }
+    sect && /installInitiatingPackageName=com\.android\.shell/ { shell=1 }
+    sect && /mDestroyed=false/ { live=1 }
+    sect && /mDestroyed=true/  { live=0 }
+    END { if (sect && id != "" && shell && live) print id }
+  ')"
+  for sid in $ids; do
+    [ -n "$sid" ] && timeout 8 "$ADB" -s "$SERIAL" shell pm install-abandon "$sid" >/dev/null 2>&1 || true
+  done
+}
+
 # Install resiliently: a wireless link can drop mid-push ("failed to read copy response: EOF"),
 # and A16 Pixels print false failures, so judge success by package presence and retry through a
 # CONDITIONAL reconnect. $1 = apk path, $2 = package id to verify is present afterwards.
@@ -49,6 +86,10 @@ install_apk() {
     timeout 90 "$ADB" -s "$SERIAL" install -r --no-streaming "$apk" >/dev/null 2>&1 || true
     ensure_connected
     if timeout 20 "$ADB" -s "$SERIAL" shell pm list packages 2>/dev/null | grep -q "${pkg}$"; then return 0; fi
+    # This attempt did not stick. A `timeout 90` that fired (or a link drop) can leave a committed-but-
+    # unfinalized orphan session behind; abandon orphans before retrying so they do not accumulate and
+    # jam PackageInstaller (making the next attempt hang) or finalize later mid-test.
+    abandon_orphan_install_sessions
     echo "install of $pkg did not stick (attempt $attempt/3); reconnecting and retrying" >&2
   done
   return 1
@@ -117,12 +158,26 @@ IFS=',' read -ra CLASS_ARR <<< "$CLASSES"
 ensure_connected
 # Fresh evidence: wipe the device journeys dir once before the loop (install does not clear it).
 "$ADB" -s "$SERIAL" shell rm -rf "/sdcard/Android/data/${PKG}/files/journeys" 2>/dev/null || true
+# Clear any orphaned install sessions before the class loop. A committed-but-unfinalized session from
+# an interrupted install (this run's setup retries, or a prior run) can be finalized by PackageManager
+# mid-class, force-stopping the instrumentation ("Process crashed"). Abandon them now so none applies
+# while a test is running - this is the load-bearing guard against the mid-run "Process crashed".
+abandon_orphan_install_sessions
 for cls in "${CLASS_ARR[@]}"; do
   ensure_connected
   # Fresh process per class: force-stop releases MediaProjection + the AudioPlaybackCapture
   # policy slot and dismisses the auto-PiP window (all process-owned). pm clear is NOT used
   # (it would wipe the journeys dir we accumulate). Home first so the next class launches clean.
   "$ADB" -s "$SERIAL" shell am force-stop "$PKG" >/dev/null 2>&1 || true
+  # A failed notification-access grant leaves a com.android.settings ActionDisabledByAppOpsDialog
+  # ("Restricted setting") modal on screen; force-stopping only Scope leaves it up, where it poisons
+  # the next class ("could not scroll"). Clear Settings too so one failure does not cascade.
+  "$ADB" -s "$SERIAL" shell am force-stop com.android.settings >/dev/null 2>&1 || true
+  # Revoke RECORD_AUDIO between classes: a class that granted it (AudioCaptureTest) leaves it granted,
+  # and PermissionGrantTest's @Before revokes it IN-PROCESS - revoking a GRANTED runtime permission
+  # force-stops the app, which is the instrumentation process, so that class reports "Process crashed".
+  # Revoking it here (app already force-stopped) makes the in-test revoke a harmless no-op.
+  "$ADB" -s "$SERIAL" shell pm revoke "$PKG" android.permission.RECORD_AUDIO >/dev/null 2>&1 || true
   "$ADB" -s "$SERIAL" shell input keyevent KEYCODE_HOME >/dev/null 2>&1 || true
   sleep 0.3   # bounded insurance for the async AudioPlaybackCapture policy-slot release.
   set +e

@@ -26,6 +26,11 @@ class AudioPolicyReleaseProbeTest {
     private val rmsJs = "(typeof state!=='undefined' && state.audio) ? state.audio.rms : -1"
 
     @Test fun measureTReleaseMs() {
+        // Durable results file: a multi-minute run floods the logcat ring buffer and evicts the early
+        // iterations' markers, so logcat alone yields only the last ~2 samples. Append each iteration
+        // here; the probe wrapper pulls THIS file (not `logcat -d`). Truncate so each run starts fresh.
+        val results = java.io.File(JourneySupport.journeysDir(), "audio-probe-results.txt")
+        results.writeText("")
         for (i in 1..n) {
             // Each iteration is independent: a failure (e.g. the OS throttling repeated projection
             // consent) logs T_release_ms=-1 and the loop continues, so the rig always emits N samples.
@@ -41,8 +46,16 @@ class AudioPolicyReleaseProbeTest {
                 val s1 = JourneySupport.launchReady()
                 JourneySupport.startSystemCapture(s1)
                 JourneySupport.cycleToView(s1, "waveform")
-                Thread.sleep(1500)
-                rmsFirst = JourneySupport.eval(s1, rmsJs).toDoubleOrNull() ?: -1.0
+                // POLL for the first capture to produce audio (the capture -> worklet -> features ->
+                // state.audio.rms pipeline plus EMA smoothing needs time to register; a single early
+                // read catches 0). If this baseline never rises, the first capture itself is broken and
+                // the iteration's T_release_ms is not a valid release-latency sample.
+                val d1 = System.currentTimeMillis() + 6000
+                while (System.currentTimeMillis() < d1) {
+                    rmsFirst = JourneySupport.eval(s1, rmsJs).toDoubleOrNull() ?: -1.0
+                    if (rmsFirst > 0.01) break
+                    Thread.sleep(100)
+                }
                 s1.close()
 
                 // Stop it (the release), then immediately start a back-to-back capture.
@@ -65,6 +78,7 @@ class AudioPolicyReleaseProbeTest {
             } finally {
                 try { tone?.stop(); tone?.release() } catch (_: Throwable) {}
                 Log.i("SCOPE_AUDIO_PROBE", "T_release_ms=$tRelease firstRms=$rmsFirst iteration=$i")
+                runCatching { results.appendText("T_release_ms=$tRelease firstRms=$rmsFirst iteration=$i\n") }
             }
         }
         JourneySupport.resetApp()
