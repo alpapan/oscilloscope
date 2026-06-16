@@ -95,6 +95,8 @@ install_apk() {
   return 1
 }
 
+# Generate the composite test tone (a build artifact, kept out of git; see gen-test-tones.sh).
+bash "$(dirname "$0")/gen-test-tones.sh"
 # Build both APKs (single pass).
 ( cd android && "$GRADLEW" --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest )
 

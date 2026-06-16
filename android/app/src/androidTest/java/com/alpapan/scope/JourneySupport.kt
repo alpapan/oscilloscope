@@ -447,7 +447,7 @@ object JourneySupport {
      * captured on physical devices; a MediaPlayer with explicit USAGE_MEDIA routes through the
      * normal media path the capture taps. Caller must stop()/release() the returned player.
      */
-    fun startMediaTone(): android.media.MediaPlayer {
+    fun startMediaTone(asset: String = "test-tone.ogg"): android.media.MediaPlayer {
         // Set the media stream to the LOWEST audible (non-silent) level: devices can boot with
         // STREAM_MUSIC at 0 (silent: nothing for the capture, mic hears only the room), so force it
         // up - but only to the minimum non-zero step, not max, to keep the tone quiet on a real device.
@@ -463,7 +463,7 @@ object JourneySupport {
             val low = maxOf(max / 3, am.getStreamMinVolume(android.media.AudioManager.STREAM_MUSIC) + 1, 1)
             am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, low, 0)
         } catch (_: Throwable) {}
-        val afd = instr.context.assets.openFd("test-tone.ogg")
+        val afd = instr.context.assets.openFd(asset)
         return android.media.MediaPlayer().apply {
             setAudioAttributes(
                 android.media.AudioAttributes.Builder()

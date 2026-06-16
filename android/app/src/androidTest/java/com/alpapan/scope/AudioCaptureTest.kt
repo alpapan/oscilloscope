@@ -26,22 +26,36 @@ class AudioCaptureTest {
         if (::s.isInitialized) s.close()
     }
 
-    @Test fun capturedAudioDrivesAnalyser() {
-        tone = JourneySupport.startMediaTone()
+    /**
+     * One captured-audio assertion: the system capture moves real data into the analyser AND the spectrum view
+     * renders it correctly. It plays a composite tone with one sine per band - 100 Hz (bass), 1500 Hz (mid),
+     * 9000 Hz (treb); see tools/audit/gen-test-tones.sh - so a single spectrum screenshot (audio-01-spectrum)
+     * shows three peaks at left / centre / right, which is verified VISUALLY (the FFT bins are not exposed in
+     * state.audio). Only ONE captured-audio test runs per instrumentation process: the harness gives the first
+     * system capture a clean audio mix and later ones capture silence, so all band coverage rides this single
+     * capture. The view-walk journeys run with no audio, so the spectrum had never been exercised with a real
+     * signal before this.
+     */
+    @Test fun capturedAudioDrivesAnalyserAndSpectrumRenders() {
+        tone = JourneySupport.startMediaTone("tone-bands-100-1500-9000hz.wav")
         Thread.sleep(500)
-        val playingAtStart = tone?.isPlaying == true
-        check(playingAtStart) { "media tone did not start playing (MediaPlayer.isPlaying == false)" }
+        check(tone?.isPlaying == true) { "media tone did not start playing (MediaPlayer.isPlaying == false)" }
 
         s = JourneySupport.launchReady()
         JourneySupport.startSystemCapture(s)
         JourneySupport.cycleToView(s, "waveform")
         Thread.sleep(3000)                       // let captured audio flow into the analyser/features
 
-        // state.audio.rms is the measured level of the captured PCM (0..1); > 0.01 means audio is
-        // actually being captured and fed to the visualiser, not just that the view rendered. The
-        // RMS threshold IS the gate predicate now, and it polls so the level has time to rise.
+        // state.audio.rms is the time-domain level of the captured PCM; > 0.01 proves audio is actually being
+        // captured and fed to the visualiser, not just that the view rendered. The gate polls so it can rise.
         val r = JourneySupport.proveScopeState(s, "audio-01-captured", "(typeof state!=='undefined' && state.audio && state.audio.rms > 0.01)")
-        check(r is ShotResult.Success) { "audio-01 gate failed: ${(r as ShotResult.Failure).reason} (tone.isPlaying start=$playingAtStart)" }
+        check(r is ShotResult.Success) { "audio-01 gate failed: ${(r as ShotResult.Failure).reason}" }
+
+        // The spectrum view must render the captured audio: its shot shows the three band peaks (left/centre/
+        // right), verified visually. Bins are not exposed in state.audio, so the screenshot is the evidence.
+        JourneySupport.cycleToView(s, "spectrum")
+        Thread.sleep(1000)
+        check(JourneySupport.proveScopeState(s, "audio-01-spectrum", "true") is ShotResult.Success) { "spectrum shot not captured" }
     }
 
     // Requires a real speaker -> mic acoustic path: the tone plays out the speaker and the raw MIC must

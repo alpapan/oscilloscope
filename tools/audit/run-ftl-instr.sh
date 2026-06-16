@@ -81,6 +81,8 @@ fi
 npm run lint
 npm run typecheck
 
+# Generate the composite test tone (a build artifact, kept out of git; see gen-test-tones.sh).
+bash "$(dirname "$0")/gen-test-tones.sh"
 ( cd android && "$GRADLEW" --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest )
 
 APP_APK="$(find "$APK_BASE/debug" -name '*.apk' -type f -print -quit)"
