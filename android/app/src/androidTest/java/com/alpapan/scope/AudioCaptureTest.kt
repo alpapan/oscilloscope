@@ -3,6 +3,7 @@ package com.alpapan.scope
 import android.media.MediaPlayer
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.filters.RequiresDevice
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -43,7 +44,11 @@ class AudioCaptureTest {
         check(r is ShotResult.Success) { "audio-01 gate failed: ${(r as ShotResult.Failure).reason} (tone.isPlaying start=$playingAtStart)" }
     }
 
-    @Test fun capturedMicAudioDrivesAnalyser() {
+    // Requires a real speaker -> mic acoustic path: the tone plays out the speaker and the raw MIC must
+    // pick it up. Emulated/virtual devices (FTL virtual, local managed-device emulators) have no acoustic
+    // loopback, so @RequiresDevice makes AndroidJUnitRunner skip it there; it still runs on physical
+    // devices (the Nokia X30 and the FTL physical matrix).
+    @Test @RequiresDevice fun capturedMicAudioDrivesAnalyser() {
         // The tone plays out the speaker; the mic capture uses raw MediaRecorder.AudioSource.MIC
         // (no AEC), so the speaker tone loops back into the mic and must register a non-zero level.
         tone = JourneySupport.startMediaTone()

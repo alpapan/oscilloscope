@@ -44,6 +44,51 @@ object JourneySupport {
         java.io.FileInputStream(pfd.fileDescriptor).bufferedReader().use { it.readText() }
     }
 
+    /** A non-app-scoped /sdcard dir that survives `pm clear`. MUST match PULL_DIR in run-ftl-instr.sh. */
+    const val MIRROR_DIR = "/sdcard/scope-journeys"
+
+    /** Run a shell command via uiAutomation (shell uid) and block until it completes by draining stdout. */
+    private fun execShellDrained(cmd: String) {
+        try {
+            val pfd = instr.uiAutomation.executeShellCommand(cmd)
+            java.io.FileInputStream(pfd.fileDescriptor).bufferedReader().use { it.readText() }
+        } catch (t: Throwable) {
+            // Mirroring is best-effort; never fail a test for it. Log (don't silently swallow) so an
+            // artifact-loss under the orchestrator pm-clear is visible in logcat for a postmortem.
+            System.err.println("JourneySupport: shell command failed ($cmd): $t")
+        }
+    }
+
+    /**
+     * Mirror every journey artifact (png + diag.json) out of the app-scoped, clearable journeys dir into
+     * MIRROR_DIR. Under FTL's Android Test Orchestrator the app data (incl. getExternalFilesDir) is
+     * `pm clear`-ed between every test method, so an un-mirrored shot is wiped before the end-of-run pull;
+     * the shell uid can read the app dir AND write MIRROR_DIR, and MIRROR_DIR survives pm clear (the FTL
+     * runner pulls MIRROR_DIR). On a local force-stop run this is harmless redundancy (the local harness
+     * pulls the app-scoped dir directly). Called from every screenshot writer's return paths.
+     */
+    private fun mirrorAll() {
+        try {
+            val files = journeysDir().listFiles() ?: return
+            if (files.isEmpty()) return
+            execShellDrained("mkdir -p $MIRROR_DIR")
+            for (f in files) {
+                // executeShellCommand tokenizes on whitespace and honors NO quotes (see grantNotification/
+                // dumpsys comments), so a path with a space would mis-split into a broken argv. Shot names
+                // are space-free kebab-case constants and the journeys dir path is space-free; guard loudly
+                // instead of silently mis-copying if that invariant is ever broken.
+                val p = f.absolutePath
+                if (p.contains(' ')) { System.err.println("JourneySupport: skipping mirror of space-containing path: $p"); continue }
+                execShellDrained("cp $p $MIRROR_DIR/")
+            }
+        } catch (_: Throwable) {}
+    }
+
+    /** Wrap a screenshot writer so MIRROR_DIR is refreshed on EVERY return path (success or failure). */
+    private inline fun mirroringShots(block: () -> ShotResult): ShotResult {
+        try { return block() } finally { mirrorAll() }
+    }
+
     /**
      * Stop any leftover capture before a journey. The capture foreground service
      * survives activity recreation (PiP / background capture), so a prior test's
@@ -224,7 +269,7 @@ object JourneySupport {
         jsPredicate: String,
         timeoutMs: Long = 8000L,
         ensureForegroundFirst: Boolean = true,
-    ): ShotResult {
+    ): ShotResult = mirroringShots {
         val started = System.currentTimeMillis()
         val deadline = started + timeoutMs
         if (ensureForegroundFirst) ensureForeground(s, timeoutMs = 5000)
@@ -313,7 +358,7 @@ object JourneySupport {
         name: String,
         byResId: String,        // "pkg:id/elem"
         timeoutMs: Long = 6000L,
-    ): ShotResult {
+    ): ShotResult = mirroringShots {
         val (pkg, id) = byResId.split(":id/")
         val seen = device.wait(Until.hasObject(By.res(pkg, id)), timeoutMs)
         val topPackage = currentPackageOnTop()
@@ -348,7 +393,7 @@ object JourneySupport {
         s: ActivityScenario<MainActivity>,
         name: String,
         timeoutMs: Long = 6000L,
-    ): ShotResult {
+    ): ShotResult = mirroringShots {
         val deadline = System.currentTimeMillis() + timeoutMs
         var inPip = false
         while (System.currentTimeMillis() < deadline && !inPip) {
@@ -403,15 +448,20 @@ object JourneySupport {
      * normal media path the capture taps. Caller must stop()/release() the returned player.
      */
     fun startMediaTone(): android.media.MediaPlayer {
-        // Force the media stream audible - devices can boot with STREAM_MUSIC at 0, which would
-        // leave the tone silent (nothing for the capture, and the mic would pick up only the room).
+        // Set the media stream to the LOWEST audible (non-silent) level: devices can boot with
+        // STREAM_MUSIC at 0 (silent: nothing for the capture, mic hears only the room), so force it
+        // up - but only to the minimum non-zero step, not max, to keep the tone quiet on a real device.
+        // The system-capture test taps the media stream digitally (volume-independent); only the
+        // acoustic mic test depends on this level, and the lowest audible step is enough on-device.
         try {
             val am = instr.targetContext.getSystemService(android.media.AudioManager::class.java)
-            am.setStreamVolume(
-                android.media.AudioManager.STREAM_MUSIC,
-                am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC),
-                0,
-            )
+            // Lowest reliable level, device-portable: ~1/3 of the stream's max. Volume 1 (absolute
+            // minimum) is too quiet for the acoustic mic-loopback test to register on a real device
+            // (verified on the Nokia X30, range 0..15), so use a low fraction that stays audible while
+            // far below the blaring max. The system-capture test is volume-independent.
+            val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            val low = maxOf(max / 3, am.getStreamMinVolume(android.media.AudioManager.STREAM_MUSIC) + 1, 1)
+            am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, low, 0)
         } catch (_: Throwable) {}
         val afd = instr.context.assets.openFd("test-tone.ogg")
         return android.media.MediaPlayer().apply {

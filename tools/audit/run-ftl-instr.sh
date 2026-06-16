@@ -14,7 +14,12 @@ APK_BASE="${SCOPE_APK_BASE:-android/app/build/outputs/apk}"
 RESULTS_BASE="${SCOPE_FTL_RESULTS_BASE:-docs/audits/2026-06-audit/ftl-instr-results}"
 GRADLEW="${GRADLEW:-./gradlew}"
 PROJECT="${SCOPE_FTL_PROJECT:-scope-audit-202606b}"
-PULL_DIR="/sdcard/Android/data/com.alpapan.scope/files/journeys"
+# Pull the orchestrator-safe MIRROR dir, not the app-scoped journeys dir. With Android Test Orchestrator
+# + clearPackageData=true (below), `pm clear` runs between every test method and wipes
+# /sdcard/Android/data/<pkg>/files/journeys; the androidTest mirror copies each shot (png + diag.json) to
+# this non-app-scoped /sdcard path, which survives pm clear (verified on-device).
+# MUST match JourneySupport.MIRROR_DIR (the androidTest side that writes the mirror).
+PULL_DIR="/sdcard/scope-journeys"
 
 CLASS_VIRTUAL=(
   "model=MediumPhone.arm,version=34,locale=en,orientation=portrait"
@@ -30,7 +35,17 @@ CLASS_PHYSICAL=(
 
 SLOT_CLASS="virtual"
 DEVICE_MODELS=("${CLASS_VIRTUAL[@]}")
-TEST_TARGETS=""
+# Default: the SAME curated journey class set the local harness validates (mirror of
+# run-instr-local.sh CLASSES) - NOT the whole APK. The whole-APK run pulls in test-helper meta-tests
+# (ProveScopeStateTest/ProveDialogStateTest) and extra journeys (SpikeCaptureTest, ...) that are flaky
+# on FTL emulators (MediaProjection consent + deep Settings UI are nondeterministic there) and, with
+# orchestrator's per-test overhead, blow the 15m budget. This list also naturally excludes the
+# @LargeTest probe (AudioPolicyReleaseProbeTest). @RequiresDevice methods inside these classes
+# auto-skip on the virtual matrix and run on physical. An explicit --test-targets replaces this default.
+# KEEP IN SYNC with run-instr-local.sh CLASSES.
+# gcloud --test-targets is a comma list where EACH element is its own fully-qualified filter, so every
+# class needs its own `class ` prefix ("class A,class B"), NOT "class A,B".
+TEST_TARGETS="class com.alpapan.scope.AudioCaptureTest,class com.alpapan.scope.PermissionGrantTest,class com.alpapan.scope.ViewWalkTest,class com.alpapan.scope.PaletteWalkTest,class com.alpapan.scope.DrawerControlsTest,class com.alpapan.scope.GestureTest,class com.alpapan.scope.PipLifecycleTest,class com.alpapan.scope.MicModeViewExclusionTest,class com.alpapan.scope.NowPlayingTest"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --physical) SLOT_CLASS="physical"; DEVICE_MODELS=("${CLASS_PHYSICAL[@]}"); shift ;;
@@ -38,6 +53,7 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+echo "Test targets: ${TEST_TARGETS}"
 
 # Phase E1: physical-matrix preflight quota gate, run BEFORE the build so an out-of-quota run
 # never wastes time assembling APKs. ftl-preflight --report is authoritative for Spark PHYSICAL
@@ -96,11 +112,18 @@ LOG="${RESULTS_DIR}/gcloud.log"
 # want to pull the screenshots that WERE produced, so do not abort, but surface the
 # exit code explicitly instead of masking it with `|| true`.
 set +e
+# Android Test Orchestrator: run each test METHOD in its own process and clearPackageData=true (pm clear)
+# between methods. This resets runtime permissions per test, so PermissionGrantTest's in-setup revoke of a
+# (now already-revoked) RECORD_AUDIO is a harmless no-op instead of killing the live instrumentation
+# process - the FTL analogue of the local harness's between-class force-stop + revoke. Screenshots survive
+# via the androidTest mirror (PULL_DIR above).
 gcloud firebase test android run \
   --project "$PROJECT" \
   --type instrumentation \
   --app "$APP_APK" \
   --test "$TEST_APK" \
+  --use-orchestrator \
+  --environment-variables clearPackageData=true \
   "${device_args[@]}" \
   "${targets_args[@]}" \
   --directories-to-pull "$PULL_DIR" \

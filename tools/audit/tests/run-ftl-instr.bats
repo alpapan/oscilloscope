@@ -56,8 +56,15 @@ teardown() { rm -rf "$TESTDIR"; }
   grep -q -- "--app" "${TESTDIR}/gcloud.argv"
   grep -q -- "--test" "${TESTDIR}/gcloud.argv"
   grep -q -- "app-debug-androidTest.apk" "${TESTDIR}/gcloud.argv"
-  grep -q -- "--directories-to-pull /sdcard/Android/data/com.alpapan.scope/files/journeys" "${TESTDIR}/gcloud.argv"
+  grep -q -- "--directories-to-pull /sdcard/scope-journeys" "${TESTDIR}/gcloud.argv"
   grep -q -- "--project scope-audit-202606b" "${TESTDIR}/gcloud.argv"
+}
+
+@test "run uses Android Test Orchestrator with clearPackageData to isolate per-test state" {
+  run env "$WRAP"
+  [ "$status" -eq 0 ]
+  grep -q -- "--use-orchestrator" "${TESTDIR}/gcloud.argv"
+  grep -q -- "--environment-variables clearPackageData=true" "${TESTDIR}/gcloud.argv"
 }
 
 @test "default uses the virtual device matrix" {
@@ -133,6 +140,27 @@ EOF
   [ "$status" -eq 0 ]
   grep -q -- "--test-targets" "${TESTDIR}/gcloud.argv"
   grep -q "ViewWalkTest" "${TESTDIR}/gcloud.argv"
+}
+
+@test "default run targets the curated journey class set (not the whole APK)" {
+  run env "$WRAP"
+  [ "$status" -eq 0 ]
+  # curated default: the journey classes the local harness validates, EACH with its own `class ` prefix
+  # (gcloud --test-targets is a comma list of full filters: "class A,class B", never "class A,B").
+  grep -q -- "--test-targets class com.alpapan.scope.AudioCaptureTest" "${TESTDIR}/gcloud.argv"
+  grep -q "class com.alpapan.scope.PermissionGrantTest" "${TESTDIR}/gcloud.argv"
+  grep -q "class com.alpapan.scope.NowPlayingTest" "${TESTDIR}/gcloud.argv"
+  # ...and NOT the @LargeTest probe or the helper meta-tests / extra journeys
+  ! grep -q "AudioPolicyReleaseProbeTest" "${TESTDIR}/gcloud.argv"
+  ! grep -q "ProveScopeStateTest" "${TESTDIR}/gcloud.argv"
+  ! grep -q "SpikeCaptureTest" "${TESTDIR}/gcloud.argv"
+}
+
+@test "explicit --test-targets overrides the curated default" {
+  run env "$WRAP" --test-targets "class com.alpapan.scope.AwaitFrameCommittedTest"
+  [ "$status" -eq 0 ]
+  grep -q "class com.alpapan.scope.AwaitFrameCommittedTest" "${TESTDIR}/gcloud.argv"   # override IS present
+  ! grep -q "com.alpapan.scope.AudioCaptureTest" "${TESTDIR}/gcloud.argv"              # curated default replaced
 }
 
 # --- Phase E1: physical preflight quota gate ---

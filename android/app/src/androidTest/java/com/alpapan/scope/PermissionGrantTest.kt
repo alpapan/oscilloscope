@@ -2,6 +2,7 @@ package com.alpapan.scope
 
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.filters.RequiresDevice
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiScrollable
@@ -52,7 +53,10 @@ class PermissionGrantTest {
         check(JourneySupport.proveScopeState(s, "perm-01-mic-granted", "document.getElementById('mobile-start').hidden === true") is ShotResult.Success)
     }
 
-    @Test fun projectionConsentAcceptedViaDialog() {
+    // Requires a real device: emulator images (e.g. the FTL MediumPhone matrix) do not surface the
+    // MediaProjection consent dialog (it is auto-handled / absent), so there is nothing to accept and the
+    // test cannot verify the consent flow. Runs + passes on physical devices (the Nokia X30, FTL physical).
+    @Test @RequiresDevice fun projectionConsentAcceptedViaDialog() {
         s = JourneySupport.launchReady()
         // System capture asks for MediaProjection consent ("Start now" == android:id/button1).
         JourneySupport.clickId(s, "mobile-capture")
@@ -62,7 +66,11 @@ class PermissionGrantTest {
         check(JourneySupport.proveScopeState(s, "perm-02-projection-granted", "document.getElementById('mobile-start').hidden === true") is ShotResult.Success)
     }
 
-    @Test fun notificationAccessGrantedViaSettings() {
+    // Requires a real device: the full notification-access Settings flow (scroll to the Scope row, then
+    // the category checkboxes) is nondeterministic on FTL emulator images (the row is intermittently not
+    // found, and some images omit the category checkboxes). Runs + passes reliably on physical devices
+    // (the Nokia X30, FTL physical). The contamination fix (orchestrator) is what lets it run there at all.
+    @Test @RequiresDevice fun notificationAccessGrantedViaSettings() {
         s = JourneySupport.launchReady()
         JourneySupport.startSystemCapture(s)          // running state so the now-playing card shows
         JourneySupport.cycleToView(s, "nowplaying")
@@ -159,6 +167,8 @@ class PermissionGrantTest {
         }
         // Deselect every auto-selected category checkbox. Re-query each pass (legacy UiObject is a
         // live handle) so a stale snapshot does not skip a freshly re-rendered row; cap as a backstop.
+        // (This whole test is @RequiresDevice - it only runs on physical devices, which render these
+        // category checkboxes; emulator images that omit them never reach here.)
         device.findObject(UiSelector().resourceId("android:id/checkbox")).waitForExists(5000)
         var guard = 0
         while (guard++ < 6) {
