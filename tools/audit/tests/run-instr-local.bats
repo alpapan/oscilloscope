@@ -107,6 +107,7 @@ teardown() { rm -rf "$TESTDIR"; }
   grep -q "com.alpapan.scope.AudioCaptureTest" "${TESTDIR}/adb.argv"
   grep -q "com.alpapan.scope.ViewWalkTest" "${TESTDIR}/adb.argv"
   grep -q "com.alpapan.scope.NowPlayingTest" "${TESTDIR}/adb.argv"
+  grep -q "com.alpapan.scope.TvJourneyTest" "${TESTDIR}/adb.argv"
 }
 
 @test "checks connection state and does not blindly reconnect when already connected" {

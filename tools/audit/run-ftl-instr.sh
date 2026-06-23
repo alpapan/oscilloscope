@@ -45,6 +45,10 @@ DEVICE_MODELS=("${CLASS_VIRTUAL[@]}")
 # KEEP IN SYNC with run-instr-local.sh CLASSES.
 # gcloud --test-targets is a comma list where EACH element is its own fully-qualified filter, so every
 # class needs its own `class ` prefix ("class A,class B"), NOT "class A,B".
+# TvJourneyTest is intentionally excluded: FTL has no TV devices, so it would always skip
+# (UiModeManager.currentModeType != UI_MODE_TYPE_TELEVISION). Run it against Sabrina via
+# run-instr-local.sh. Every other journey class that has @RequiresDevice methods still belongs
+# here; those methods auto-skip on the virtual matrix and run on physical.
 TEST_TARGETS="class com.alpapan.scope.AudioCaptureTest,class com.alpapan.scope.PermissionGrantTest,class com.alpapan.scope.ViewWalkTest,class com.alpapan.scope.PaletteWalkTest,class com.alpapan.scope.DrawerControlsTest,class com.alpapan.scope.GestureTest,class com.alpapan.scope.PipLifecycleTest,class com.alpapan.scope.MicModeViewExclusionTest,class com.alpapan.scope.NowPlayingTest"
 while [[ $# -gt 0 ]]; do
   case "$1" in

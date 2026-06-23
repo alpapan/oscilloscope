@@ -127,6 +127,21 @@ object JourneySupport {
         return s
     }
 
+    /**
+     * TV-mode readiness: waits for the tv-pair-overlay to become visible, which is
+     * the final DOM signal that startTvMode() + startTvReceiver() have completed.
+     * The TV path in main.js returns early (before mobile-capture wiring), so
+     * launchReady() always times out on a TV; use this instead on Sabrina.
+     */
+    fun launchReadyTv(): ActivityScenario<MainActivity> {
+        val s = ActivityScenario.launch(MainActivity::class.java)
+        val ready = "!document.getElementById('tv-pair-overlay').hidden"
+        val deadline = System.currentTimeMillis() + 20_000
+        while (System.currentTimeMillis() < deadline && eval(s, ready) != "true") Thread.sleep(250)
+        check(eval(s, ready) == "true") { "tv-pair-overlay never shown (TV init did not complete)" }
+        return s
+    }
+
     fun eval(s: ActivityScenario<MainActivity>, js: String): String {
         val latch = CountDownLatch(1); val out = arrayOfNulls<String>(1)
         s.onActivity { (it as BridgeActivity).bridge.webView.evaluateJavascript(js) { v -> out[0] = v; latch.countDown() } }
@@ -480,10 +495,42 @@ object JourneySupport {
         }
     }
 
-    /** Click the system-capture button and accept consent (best-effort on emulators that auto-grant). Returns when capture is active. */
+    /**
+     * Click the system-capture button and accept the MediaProjection consent dialog.
+     * Three modes depending on device/API:
+     *  - FTL virtual ≤35: consent auto-granted (no dialog); loop exits immediately.
+     *  - Physical devices (Nokia API 34, a35x API 36): dialog shows, android:id/button1 is
+     *    in the accessibility tree → tapDialog succeeds.
+     *  - FTL virtual API 36: dialog shows (top package becomes com.android.systemui) but the
+     *    MediaProjectionPermissionActivity window is NOT in UiAutomator's accessibility tree
+     *    (ByMatcher returns null children for all SystemUI nodes); fall back to a coordinate
+     *    tap. The dialog has two buttons: Cancel (left) and "Share screen" (right, button1).
+     *    Video evidence from FTL runs shows the positive button at ~77% of screen width and
+     *    ~67% of screen height on a 1080×2400 MediumPhone.arm screen. The loop does NOT exit
+     *    after the tap - the next iteration detects success via mobile-start.hidden so a
+     *    missed tap gets a retry.
+     */
     fun startSystemCapture(s: ActivityScenario<MainActivity>) {
         clickId(s, "mobile-capture")
-        tapDialog("android:id/button1", 6000)
+        val deadline = System.currentTimeMillis() + 8000
+        while (System.currentTimeMillis() < deadline) {
+            if (waitJs(s, "document.getElementById('mobile-start').hidden === true", 200) == "true") break
+            if (currentPackageOnTop() == "com.android.systemui") {
+                if (!tapDialog("android:id/button1", 1000)) {
+                    // "Share screen" is the RIGHT-side button (~77% across, ~67% down).
+                    // Tapping the center (width/2) lands between Cancel and Share screen.
+                    val tapX = (device.displayWidth * 77) / 100
+                    val tapY = (device.displayHeight * 67) / 100
+                    execShellDrained("input tap $tapX $tapY")
+                    Thread.sleep(500)
+                }
+                // No break: next iteration re-checks mobile-start.hidden to confirm the tap
+                // worked; if it missed, topPkg will still be com.android.systemui and the
+                // loop will tap again.
+            } else {
+                Thread.sleep(150)
+            }
+        }
         assertJs(s, "document.getElementById('mobile-start').hidden === true")
     }
 

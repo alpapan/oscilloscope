@@ -20,7 +20,7 @@ fi
 # non-root recovery in a boot session - proven on the Nokia X30; only a reboot clears it). Running it
 # before any capture-churn class gives it a clean mix. The other capturing classes only assert that a
 # view renders, not audio content, so their (possibly silenced) captures still pass.
-CLASSES="${2:-com.alpapan.scope.AudioCaptureTest,com.alpapan.scope.PermissionGrantTest,com.alpapan.scope.ViewWalkTest,com.alpapan.scope.PaletteWalkTest,com.alpapan.scope.DrawerControlsTest,com.alpapan.scope.GestureTest,com.alpapan.scope.PipLifecycleTest,com.alpapan.scope.MicModeViewExclusionTest,com.alpapan.scope.NowPlayingTest}"
+CLASSES="${2:-com.alpapan.scope.AudioCaptureTest,com.alpapan.scope.PermissionGrantTest,com.alpapan.scope.ViewWalkTest,com.alpapan.scope.PaletteWalkTest,com.alpapan.scope.DrawerControlsTest,com.alpapan.scope.GestureTest,com.alpapan.scope.PipLifecycleTest,com.alpapan.scope.MicModeViewExclusionTest,com.alpapan.scope.NowPlayingTest,com.alpapan.scope.TvJourneyTest}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

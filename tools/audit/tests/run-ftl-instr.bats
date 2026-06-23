@@ -156,6 +156,13 @@ EOF
   ! grep -q "SpikeCaptureTest" "${TESTDIR}/gcloud.argv"
 }
 
+@test "TvJourneyTest is excluded from the FTL curated set (FTL has no TV devices; use run-instr-local.sh on Sabrina)" {
+  run env "$WRAP"
+  [ "$status" -eq 0 ]
+  grep -q "class com.alpapan.scope.AudioCaptureTest" "${TESTDIR}/gcloud.argv"  # anchor: gcloud ran
+  ! grep -q "TvJourneyTest" "${TESTDIR}/gcloud.argv"
+}
+
 @test "explicit --test-targets overrides the curated default" {
   run env "$WRAP" --test-targets "class com.alpapan.scope.AwaitFrameCommittedTest"
   [ "$status" -eq 0 ]
