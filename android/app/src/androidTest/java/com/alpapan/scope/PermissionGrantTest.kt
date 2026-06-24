@@ -113,6 +113,9 @@ class PermissionGrantTest {
         check(JourneySupport.ensureForeground(s, timeoutMs = 8000)) { "could not re-foreground Scope" }
         JourneySupport.cycleToView(s, "waveform")
         JourneySupport.cycleToView(s, "nowplaying")
-        check(JourneySupport.proveScopeState(s, "perm-04-notif-granted", "!document.querySelector('.np-grant') && !!document.querySelector('.np-placeholder')") is ShotResult.Success)
+        // Check: grant prompt gone AND card is visible (not hidden). Do NOT assert .np-placeholder
+        // specifically: if a media app is reporting a session the card renders track info instead,
+        // which is equally valid evidence that access was granted.
+        check(JourneySupport.proveScopeState(s, "perm-04-notif-granted", "(() => { const c = document.getElementById('now-playing-card'); return !!(c && !c.hidden && !c.querySelector('.np-grant')); })()") is ShotResult.Success)
     }
 }

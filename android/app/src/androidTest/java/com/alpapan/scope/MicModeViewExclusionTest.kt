@@ -17,6 +17,10 @@ class MicModeViewExclusionTest {
 
     @Test fun nowPlayingUnreachableInMicMode() {
         s = JourneySupport.launchReady()
+        // micModeAuto must be false: if true, onUnrestrictedAvailable auto-switches back to
+        // projection mode (state.micMode=false) and nowplaying re-enters the cycle.
+        // DrawerControlsTest resets it to false, but guard here in case of test-order changes.
+        JourneySupport.eval(s, "var m=document.getElementById('mobile-micmode-auto'); if(m&&m.checked){m.checked=false; m.dispatchEvent(new Event('change',{bubbles:true}));} 'ok'")
         JourneySupport.startMicCapture(s)
 
         // The exclusion lives in cycleView (viewsFor drops nowplaying in mic mode), NOT in the

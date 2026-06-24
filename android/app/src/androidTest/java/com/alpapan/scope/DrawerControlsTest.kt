@@ -13,7 +13,13 @@ class DrawerControlsTest {
     private lateinit var s: ActivityScenario<MainActivity>
 
     @Before fun setup() { JourneySupport.resetApp(); JourneySupport.grantMic() }
-    @After fun tearDown() { if (::s.isInitialized) s.close() }
+    @After fun tearDown() {
+        if (::s.isInitialized) {
+            // Safety reset: ensure micModeAuto is false in localStorage even if an assertion above threw.
+            try { JourneySupport.eval(s, "var m=document.getElementById('mobile-micmode-auto'); if(m&&m.checked){m.checked=false; m.dispatchEvent(new Event('change',{bubbles:true}));} 'ok'") } catch (_: Throwable) {}
+            s.close()
+        }
+    }
 
     @Test fun drawerControlsRespond() {
         s = JourneySupport.launchReady()
@@ -56,9 +62,13 @@ class DrawerControlsTest {
         JourneySupport.eval(s, "var k=document.getElementById('mobile-keepawake'); k.checked=!k.checked; k.dispatchEvent(new Event('change',{bubbles:true})); 'ok'")
         check(JourneySupport.proveScopeState(s, "ctrl-05-keepawake", "typeof document.getElementById('mobile-keepawake').checked === 'boolean'") is ShotResult.Success)
 
-        // micmode-auto toggle flips (persisted to localStorage).
-        JourneySupport.eval(s, "var m=document.getElementById('mobile-micmode-auto'); m.checked=!m.checked; m.dispatchEvent(new Event('change',{bubbles:true})); 'ok'")
-        check(JourneySupport.proveScopeState(s, "ctrl-06-micmode-auto", "typeof document.getElementById('mobile-micmode-auto').checked === 'boolean'") is ShotResult.Success)
+        // micmode-auto toggle: force to true, verify, then reset to false so localStorage is clean
+        // for subsequent tests (MicModeViewExclusionTest depends on micModeAuto being false).
+        JourneySupport.eval(s, "var m=document.getElementById('mobile-micmode-auto'); m.checked=true; m.dispatchEvent(new Event('change',{bubbles:true})); 'ok'")
+        JourneySupport.assertJs(s, "document.getElementById('mobile-micmode-auto').checked === true")
+        check(JourneySupport.proveScopeState(s, "ctrl-06-micmode-auto", "document.getElementById('mobile-micmode-auto').checked === true") is ShotResult.Success)
+        JourneySupport.eval(s, "var m=document.getElementById('mobile-micmode-auto'); m.checked=false; m.dispatchEvent(new Event('change',{bubbles:true})); 'ok'")
+        JourneySupport.assertJs(s, "!document.getElementById('mobile-micmode-auto').checked")
 
         // Per-band EQ, then reset to 1.0.
         JourneySupport.setRange(s, "mobile-eq-bass", "1.8")
